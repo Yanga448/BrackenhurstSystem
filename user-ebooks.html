@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>eBooks — Brackenhurst Library</title>
+<link rel="stylesheet" href="css/site.css">
+<style>
+  .ebooks-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-top: 20px;
+  }
+  .ebook-card {
+    background: #fff;
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    padding: 12px;
+    text-align: center;
+    transition: transform 0.2s;
+  }
+  .ebook-card:hover { transform: translateY(-3px); }
+  .ebook-card img {
+    width: 100%;
+    height: 260px;
+    object-fit: cover;
+    border-radius: 8px;
+  }
+  .ebook-card h4 {
+    margin: 10px 0 5px;
+    color: #1e3a8a;
+  }
+  .ebook-card p {
+    color: #555;
+    font-size: 14px;
+  }
+  .btn-read, .btn-save {
+    margin: 6px 2px;
+    padding: 8px 12px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .btn-read { background: #4f46e5; color: #fff; }
+  .btn-read:hover { background: #4338ca; }
+  .btn-save { background: #e0e7ff; color: #1e3a8a; }
+  .btn-save:hover { background: #c7d2fe; }
+
+  /* Full-screen reader overlay */
+  #readerOverlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.85);
+    display: none;
+    flex-direction: column;
+    z-index: 9999;
+  }
+  #readerOverlay iframe {
+    flex: 1;
+    border: none;
+    width: 100%;
+    height: calc(100% - 60px);
+  }
+  #readerHeader {
+    background: #1e3a8a;
+    color: white;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+  }
+  #closeReader {
+    background: #ef4444;
+    border: none;
+    color: white;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #closeReader:hover { background: #dc2626; }
+
+  .search-bar {
+    margin: 15px 0;
+    text-align: right;
+  }
+  .search-bar input {
+    padding: 8px 10px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    width: 250px;
+  }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="app-sidebar">
+    <div>
+      <div class="brand">Brackenhurst</div>
+      <nav class="nav" role="navigation">
+        <a href="user-dashboard.html">Dashboard</a>
+        <a href="user-ebooks.html" class="active">eBooks</a>
+        <a href="saved-ebooks.html">My Saved eBooks</a>
+        <a href="borrow-books.html">Borrow Books</a>
+        <a href="my-loans.html">My Loans</a>
+      </nav>
+    </div>
+    <div class="small">Logged in as User</div>
+    <button id="logout" class="btn" style="margin:10px;">Logout</button>
+  </aside>
+
+  <main class="app-main">
+    <div class="header-row">
+      <div>
+        <div class="page-title">eBooks Library</div>
+        <div class="small">Browse and read approved digital books</div>
+      </div>
+    </div>
+
+    <div class="search-bar">
+      <input type="text" id="searchInput" placeholder="Search by title or author...">
+    </div>
+
+    <section id="ebooksSection">
+      <div id="accessMsg" style="display:none;text-align:center;margin-top:40px;color:#ef4444;">
+        <h3>Access Restricted</h3>
+        <p>Please complete your verification first to access eBooks.</p>
+      </div>
+      <div class="ebooks-grid" id="ebooksGrid"></div>
+    </section>
+  </main>
+</div>
+
+<!-- Full Page Reader Overlay -->
+<div id="readerOverlay">
+  <div id="readerHeader">
+    <h3 id="readerTitle"></h3>
+    <button id="closeReader">Close Reader</button>
+  </div>
+  <iframe id="readerFrame"></iframe>
+</div>
+
+<!-- Replace your current <script type="module"> ... </script> with the block below -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+import { getFirestore, getDoc, doc, collection, getDocs, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+  authDomain: "brackenhurstsystem.firebaseapp.com",
+  projectId: "brackenhurstsystem",
+  storageBucket: "brackenhurstsystem.appspot.com",
+  messagingSenderId: "98472895167",
+  appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let currentUser = null;
+const DEFAULT_COVER = "images/default-cover.png"; // keep or update path
+
+// helper: check whether a string looks like a base64 data URI and is not obviously truncated
+function looksLikeDataUri(s) {
+  return typeof s === "string" && /^data:([a-zA-Z0-9\/+]+);base64,/.test(s) && s.length > 200;
+}
+
+// convert data:url (base64) to Blob
+function dataUrlToBlob(dataUrl) {
+  const parts = dataUrl.split(',');
+  const header = parts[0];
+  const base64 = parts[1] || '';
+  const mimeMatch = header.match(/data:([^;]+);base64/);
+  const mime = (mimeMatch && mimeMatch[1]) || 'application/octet-stream';
+  const byteString = atob(base64);
+  const ab = new ArrayBuffer(byteString.length);
+  const ia = new Uint8Array(ab);
+  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+  return new Blob([ab], { type: mime });
+}
+
+// create object URL safely and remember to revoke old ones
+let currentPdfObjectUrl = null;
+function setPdfInIframe(dataUrl, iframeEl) {
+  if (!dataUrl) { iframeEl.src = ""; return; }
+  try {
+    const blob = dataUrlToBlob(dataUrl);
+    if (currentPdfObjectUrl) { URL.revokeObjectURL(currentPdfObjectUrl); currentPdfObjectUrl = null; }
+    currentPdfObjectUrl = URL.createObjectURL(blob);
+    // open inside iframe. the #toolbar=0 trick works with PDF viewers
+    iframeEl.src = currentPdfObjectUrl + "#toolbar=0&navpanes=0";
+  } catch (err) {
+    console.warn("Failed to create blob from base64 pdf", err);
+    iframeEl.src = ""; // fail gracefully
+  }
+}
+
+// modal for zoomed images
+function createImageModal() {
+  if (document.getElementById('zoomModal')) return;
+  const div = document.createElement('div');
+  div.id = 'zoomModal';
+  Object.assign(div.style, {
+    position: 'fixed', inset: '0', display: 'none', justifyContent: 'center', alignItems: 'center',
+    background: 'rgba(0,0,0,0.85)', zIndex: 10000, padding: '18px'
+  });
+  div.innerHTML = `<div style="max-width:1200px;max-height:90vh;overflow:auto;">
+    <button id="closeZoom" style="position:absolute;top:18px;right:18px;padding:8px 12px;border-radius:6px;background:#ef4444;color:white;border:none;cursor:pointer">Close</button>
+    <img id="zoomImg" style="max-width:100%;max-height:80vh;border-radius:8px;box-shadow:0 6px 30px rgba(0,0,0,0.5)"/>
+  </div>`;
+  document.body.appendChild(div);
+  document.getElementById('closeZoom').addEventListener('click', ()=> { div.style.display = 'none'; document.getElementById('zoomImg').src = ''; });
+  div.addEventListener('click', (e)=> { if (e.target === div) { div.style.display='none'; document.getElementById('zoomImg').src=''; }});
+}
+createImageModal();
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) return (window.location.href = "login.html");
+  const snap = await getDoc(doc(db, "users", user.uid));
+  if (!snap.exists()) { alert("User profile missing."); return; }
+  currentUser = { id: user.uid, ...snap.data() };
+  document.querySelector('.small').textContent = `Logged in as ${currentUser.fullName || 'User'}`;
+
+  if (currentUser.verificationStatus !== "approved") {
+    document.getElementById("accessMsg").style.display = "block";
+    return;
+  }
+  document.getElementById("accessMsg").style.display = "none";
+  await loadEbooks();
+});
+
+async function loadEbooks() {
+  const ebooksSnap = await getDocs(collection(db, "ebooks"));
+  const grid = document.getElementById("ebooksGrid");
+  grid.innerHTML = "";
+  ebooksSnap.forEach(docSnap => {
+    const ebook = docSnap.data();
+    // be flexible with field names (coverImage vs cover) and (pdfFile vs pdf)
+    const cover = ebook.coverImage || ebook.cover || ebook.coverImg || "";
+    const pdf = ebook.pdfFile || ebook.pdf || ebook.pdfData || "";
+    const title = ebook.title || "Untitled";
+    const author = ebook.author || "Unknown";
+    const category = ebook.category || "";
+    const id = docSnap.id;
+
+    const card = document.createElement("div");
+    card.className = "ebook-card";
+
+    // image element with error fallback
+    const imgHtml = `<img src="${cover && looksLikeDataUri(cover) ? cover : DEFAULT_COVER}" alt="cover" onerror="this.onerror=null;this.src='${DEFAULT_COVER}';" data-cover="${cover ? '1' : '0'}" style="cursor:pointer;" />`;
+
+    card.innerHTML = `
+      ${imgHtml}
+      <h4>${escapeHtml(title)}</h4>
+      <p>${escapeHtml(author)}</p>
+      <p><em>${escapeHtml(category)}</em></p>
+      <div>
+        <button class="btn-read" data-pdf="${pdf}" data-title="${escapeHtml(title)}">Read Online</button>
+        <button class="btn-save" data-id="${id}">Save for Later</button>
+      </div>
+    `;
+    grid.appendChild(card);
+  });
+
+  bindActions();
+}
+
+// small helper to escape HTML
+function escapeHtml(s){ if (s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+function bindActions() {
+  // image click to zoom
+  document.querySelectorAll('.ebook-card img').forEach(img => {
+    img.addEventListener('click', (e) => {
+      const src = e.currentTarget.src;
+      const modal = document.getElementById('zoomModal');
+      const zoomImg = document.getElementById('zoomImg');
+      zoomImg.src = src;
+      modal.style.display = 'flex';
+    });
+  });
+
+  // read button
+  document.querySelectorAll(".btn-read").forEach(btn => {
+    btn.addEventListener("click", (ev) => {
+      const data = btn.dataset.pdf;
+      const title = btn.dataset.title || "Reader";
+      const overlay = document.getElementById("readerOverlay");
+      document.getElementById("readerTitle").textContent = title;
+
+      if (!data) {
+        alert("PDF not available for this eBook.");
+        return;
+      }
+
+      // if data URL looks like base64 data URI, create blob object URL
+      if (looksLikeDataUri(data)) {
+        setPdfInIframe(data, document.getElementById("readerFrame"));
+        overlay.style.display = "flex";
+        return;
+      }
+
+      // otherwise assume it's an http(s) link to a PDF
+      try {
+        document.getElementById("readerFrame").src = data + (data.indexOf('#') === -1 ? "#toolbar=0" : "");
+        overlay.style.display = "flex";
+      } catch (err) {
+        console.error("Failed to load PDF", err);
+        alert("Cannot open this PDF in the reader.");
+      }
+    });
+  });
+
+  // save for later
+  document.querySelectorAll(".btn-save").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      try {
+        await updateDoc(doc(db, "users", currentUser.id), {
+          savedEbooks: arrayUnion(id)
+        });
+        btn.textContent = "Saved ✅";
+        btn.disabled = true;
+      } catch (err) {
+        console.error(err);
+        alert("Failed to save.");
+      }
+    });
+  });
+
+  // search handler
+  document.getElementById("searchInput").addEventListener("input", (e) => {
+    const term = e.target.value.toLowerCase();
+    document.querySelectorAll(".ebook-card").forEach(card => {
+      const text = card.textContent.toLowerCase();
+      card.style.display = text.includes(term) ? "" : "none";
+    });
+  });
+}
+
+// close reader
+document.getElementById("closeReader").addEventListener("click", () => {
+  document.getElementById("readerOverlay").style.display = "none";
+  const f = document.getElementById("readerFrame");
+  f.src = "";
+  if (currentPdfObjectUrl) { URL.revokeObjectURL(currentPdfObjectUrl); currentPdfObjectUrl = null; }
+});
+
+// logout
+document.getElementById("logout").addEventListener("click", async () => {
+  await signOut(auth);
+  window.location.href = "login.html";
+});
+</script>
+
+</body>
+</html>

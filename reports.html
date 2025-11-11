@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Reports — Brackenhurst</title>
+<link rel="stylesheet" href="css/site.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav">
+          <a href="admin-dashboard.html">Dashboard</a>
+          <a href="books.html">Books</a>
+          <a href="users.html">Users</a>
+          <a href="reports.html" class="active">Reports</a>
+          <a href="logs.html">System Logs</a>
+        </nav>
+      </div>
+      <div class="small">Logged in as Admin</div>
+    </aside>
+
+    <!-- Main -->
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">Reports</div>
+          <div class="small">Analytics overview for library performance</div>
+        </div>
+        <div class="row">
+          <button id="logout" class="btn">Logout</button>
+        </div>
+      </div>
+
+      <section class="stats-grid">
+        <div class="card">
+          <h3>Total Users</h3>
+          <p id="repUsers">—</p>
+        </div>
+        <div class="card">
+          <h3>Total Books</h3>
+          <p id="repBooks">—</p>
+        </div>
+        <div class="card">
+          <h3>Total Loans</h3>
+          <p id="repLoans">—</p>
+        </div>
+        <div class="card">
+          <h3>Overdue Books</h3>
+          <p id="repOverdue">—</p>
+        </div>
+      </section>
+
+      <section>
+        <h3>Recent Loan Activity</h3>
+        <table class="table">
+          <thead>
+            <tr><th>Book</th><th>User</th><th>Status</th><th>Date</th></tr>
+          </thead>
+          <tbody id="loanActivity">
+            <tr><td colspan="4" style="text-align:center;">Loading...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+import { getFirestore, collection, getCountFromServer, query, orderBy, limit, getDocs } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+  authDomain: "brackenhurstsystem.firebaseapp.com",
+  projectId: "brackenhurstsystem",
+  storageBucket: "brackenhurstsystem.appspot.com",
+  messagingSenderId: "98472895167",
+  appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+onAuthStateChanged(auth, async (user) => {
+  if (!user) return window.location.href = "login.html";
+
+  // counts
+  try {
+    document.getElementById("repUsers").innerText = (await getCountFromServer(collection(db, "users"))).data().count;
+    document.getElementById("repBooks").innerText = (await getCountFromServer(collection(db, "books"))).data().count;
+    document.getElementById("repLoans").innerText = (await getCountFromServer(collection(db, "loans"))).data().count;
+    document.getElementById("repOverdue").innerText = (await getCountFromServer(collection(db, "overdue"))).data().count;
+  } catch (e) {
+    console.warn(e);
+  }
+
+  // recent loan activity
+  try {
+    const q = query(collection(db, "loans"), orderBy("date", "desc"), limit(6));
+    const snap = await getDocs(q);
+    const tbody = document.getElementById("loanActivity");
+    tbody.innerHTML = "";
+    snap.forEach(docSnap => {
+      const l = docSnap.data();
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${l.bookTitle || "—"}</td>
+        <td>${l.userName || "—"}</td>
+        <td>${l.status || "—"}</td>
+        <td>${new Date(l.date).toLocaleDateString()}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  } catch (e) {
+    console.error(e);
+  }
+});
+
+document.getElementById("logout").addEventListener("click", async () => {
+  await signOut(auth);
+  window.location.href = "login.html";
+});
+</script>
+</body>
+</html>

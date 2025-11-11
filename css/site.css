@@ -1,0 +1,116 @@
+/* site.css - shared for all dashboards + auth pages (Brackenhurst prototype) */
+
+/* Reset & base */
+* { box-sizing: border-box; margin:0; padding:0; font-family:"Segoe UI", Roboto, Arial, sans-serif; }
+body { background:#f9fafb; color:#111827; line-height:1.5; }
+
+/* Layout container */
+.app-shell {
+  display:flex;
+  min-height:100vh;
+}
+
+/* Sidebar */
+.app-sidebar {
+  width:260px;
+  background:#eef2ff;
+  border-right:1px solid #e5e7eb;
+  padding:22px 18px;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+}
+.brand { color:#1e3a8a; font-weight:700; font-size:20px; margin-bottom:10px; }
+.nav { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+.nav a { text-decoration:none; color:#374151; padding:9px 12px; border-radius:8px; display:block; }
+.nav a:hover, .nav a.active { background:#dbeafe; color:#1d4ed8; font-weight:600; }
+
+/* Main area */
+.app-main {
+  flex:1;
+  padding:28px 36px;
+}
+.header-row {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+  margin-bottom:18px;
+}
+.page-title { font-size:22px; font-weight:700; color:#0f172a; }
+.small { color:#6b7280; }
+
+/* Cards */
+.stats-grid {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(200px,1fr));
+  gap:18px;
+  margin-bottom:22px;
+}
+.card {
+  background:#fff;
+  border:1px solid #e6e9f4;
+  border-radius:12px;
+  padding:18px;
+  box-shadow:0 4px 14px rgba(0,0,0,0.04);
+}
+.card h3 { color:#1e3a8a; font-size:15px; margin-bottom:8px; }
+.card p { font-size:22px; font-weight:600; color:#111827; }
+
+/* Welcome box */
+.welcome {
+  background:linear-gradient(90deg, #eef2ff, #f0f9ff);
+  padding:18px;
+  border-radius:10px;
+  border:1px solid #e5eefc;
+  margin-bottom:18px;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+}
+.welcome .txt { text-align:left; }
+.welcome h2 { margin:0; font-size:20px; color:#0f172a; }
+.welcome p { margin:6px 0 0; color:#374151; }
+
+/* Buttons */
+.btn {
+  display:inline-block;
+  padding:10px 14px;
+  border-radius:8px;
+  border:none;
+  cursor:pointer;
+  font-weight:600;
+}
+.btn-primary { background:#4f46e5; color:#fff; }
+.btn-primary:hover { background:#4338ca; }
+.btn-ghost { background:transparent; color:#1d4ed8; border:1px solid transparent; }
+
+/* Table */
+.table {
+  width:100%;
+  border-collapse:collapse;
+  background:#fff;
+  border-radius:8px;
+  overflow:hidden;
+  box-shadow:0 4px 8px rgba(0,0,0,0.04);
+}
+.table th {
+  background:#eef2ff;
+  color:#1e3a8a;
+  text-align:left;
+  padding:12px 14px;
+  font-weight:600;
+}
+.table td { padding:12px 14px; border-top:1px solid #f3f4f6; color:#111827; }
+
+/* Small utilities */
+.row { display:flex; gap:12px; align-items:center; }
+.right { margin-left:auto; }
+.card-sub { color:#6b7280; font-size:13px; }
+
+/* Responsive */
+@media (max-width:900px){
+  .app-sidebar { width:100%; flex-direction:row; gap:6px; padding:12px; border-right:none; border-bottom:1px solid #e5e7eb;}
+  .app-shell { flex-direction:column; }
+  .app-main { padding:18px; }
+}

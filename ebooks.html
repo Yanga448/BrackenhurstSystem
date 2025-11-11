@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>eBooks Management — Brackenhurst (Librarian)</title>
+<link rel="stylesheet" href="css/site.css" />
+<style>
+  .cover-thumb { width:64px; height:88px; object-fit:cover; border-radius:6px; }
+  .table .td-actions { display:flex; gap:8px; align-items:center; }
+  .pdf-preview { max-width:140px; max-height:160px; object-fit:contain; border-radius:6px; }
+  .modal { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,0.6); z-index:10000; }
+  .modal .panel { max-width:920px; width:100%; height:92vh; background:white; border-radius:8px; overflow:auto; padding:12px; }
+</style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav" role="navigation">
+          <a href="librarian-dashboard.html">Dashboard</a>
+          <a href="librarian-books.html">Books</a>
+          <a href="librarian-ebooks.html" class="active">eBooks</a>
+          <a href="ebook-subscriptions.html">eBook Subscriptions</a>
+          <a href="loan-subscriptions.html">Loan Subscriptions</a>
+          <a href="loans.html">Loans</a>
+          <a href="members.html">Members</a>
+          <a href="logs.html">Logs</a>
+        </nav>
+      </div>
+      <div class="small">Logged in as Librarian</div>
+    </aside>
+
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">Manage eBooks</div>
+          <div class="small">Add, edit or remove eBooks. PDFs are stored as Base64 inside Firestore (note size limits).</div>
+        </div>
+        <div class="row">
+          <button id="btnNew" class="btn btn-primary">Add eBook</button>
+          <button id="logout" class="btn">Logout</button>
+        </div>
+      </div>
+
+      <div id="notifications"></div>
+
+      <div id="formCard" class="card" style="display:none; margin-top:12px;">
+        <h3 id="formTitle">Add eBook</h3>
+        <form id="ebookForm">
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <input id="tTitle" placeholder="Title" required style="flex:2; padding:8px;">
+            <input id="tAuthor" placeholder="Author" required style="flex:1; padding:8px;">
+            <input id="tCategory" placeholder="Category" style="flex:1; padding:8px;">
+          </div>
+          <div style="margin-top:8px;">
+            <label class="small-note">Cover image (optional)</label><br>
+            <input id="tCover" type="file" accept="image/*">
+            <div id="coverPreview" style="margin-top:8px;"></div>
+          </div>
+          <div style="margin-top:8px;">
+            <label class="small-note">PDF file (small files only). Firestore documents have strict size limits — use Cloud Storage in production.</label><br>
+            <input id="tPdf" type="file" accept="application/pdf">
+            <div id="pdfPreview" style="margin-top:8px;"></div>
+          </div>
+          <div style="margin-top:8px;">
+            <button class="btn btn-primary" id="saveEbook">Save</button>
+            <button class="btn btn-ghost" id="cancelEbook" type="button">Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      <section style="margin-top:12px;">
+        <table class="table">
+          <thead><tr><th>Cover</th><th>Title</th><th>Author</th><th>Category</th><th>Added By</th><th>Actions</th></tr></thead>
+          <tbody id="ebooksTable"><tr><td colspan="6" style="text-align:center;">Loading...</td></tr></tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <!-- PDF / cover preview modal -->
+  <div id="modal" class="modal" aria-hidden="true">
+    <div class="panel">
+      <button id="modalClose" class="btn btn-ghost" style="float:right">Close</button>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+<script type="module">
+/*
+  ebooks.html - Librarian eBook management
+  - Add/Edit/Delete eBooks, storing coverBase64 and pdfBase64 in Firestore `ebooks` collection
+  - WARNING in comments: Firestore documents have size limits (~1MiB) — PDFs larger than that will fail.
+*/
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+import { getFirestore, collection, addDoc, getDocs, updateDoc, deleteDoc, doc } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+  authDomain: "brackenhurstsystem.firebaseapp.com",
+  projectId: "brackenhurstsystem",
+  storageBucket: "brackenhurstsystem.appspot.com",
+  messagingSenderId: "98472895167",
+  appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let currentLibrarian = null;
+let editingId = null;
+let coverBase64 = '', pdfBase64 = '';
+
+// UI refs
+const formCard = document.getElementById('formCard');
+const tCover = document.getElementById('tCover');
+const coverPreview = document.getElementById('coverPreview');
+const tPdf = document.getElementById('tPdf');
+const pdfPreview = document.getElementById('pdfPreview');
+
+// auth guard
+onAuthStateChanged(auth, async user => {
+  if(!user) return window.location.href = 'login.html';
+  // you might also want to check role in users collection; skipping for brevity: assume librarian
+  currentLibrarian = user.email || user.uid;
+  loadTable();
+});
+
+// new ebook button
+document.getElementById('btnNew').addEventListener('click', ()=>openForm(null));
+document.getElementById('cancelEbook').addEventListener('click', ()=>{ formCard.style.display='none'; editingId=null; });
+
+// handle cover file -> base64
+tCover.addEventListener('change', function(){
+  const f = this.files[0]; if(!f){ coverBase64=''; coverPreview.innerHTML=''; return; }
+  const r = new FileReader(); r.onloadend=()=>{ coverBase64 = r.result; coverPreview.innerHTML = `<img src="${coverBase64}" class="pdf-preview">`; }; r.readAsDataURL(f);
+});
+
+// handle pdf file -> base64 (WARNING: big files will break Firestore docs)
+tPdf.addEventListener('change', function(){
+  const f = this.files[0]; if(!f){ pdfBase64=''; pdfPreview.innerHTML=''; return; }
+  if(f.size > 800000){ // conservative warning (~800KB)
+    if(!confirm("PDF looks large ("+Math.round(f.size/1024)+" KB). Storing large PDFs in Firestore may fail (document size limits). Continue?")) { tPdf.value=''; return; }
+  }
+  const r = new FileReader(); r.onloadend=()=>{ pdfBase64 = r.result; pdfPreview.innerHTML = `<div class="small-note">PDF ready (${Math.round(f.size/1024)} KB)</div>`; }; r.readAsDataURL(f);
+});
+
+// open form
+function openForm(id){
+  editingId = id || null;
+  formCard.style.display = 'block';
+  document.getElementById('formTitle').innerText = id? 'Edit eBook' : 'Add eBook';
+  document.getElementById('ebookForm').reset();
+  coverPreview.innerHTML=''; pdfPreview.innerHTML='';
+  coverBase64=''; pdfBase64='';
+  if(id){
+    // load doc
+    getDocs(collection(db,'ebooks')).then(snap=>{
+      snap.forEach(s=>{
+        if(s.id===id){
+          const d=s.data();
+          document.getElementById('tTitle').value=d.title||'';
+          document.getElementById('tAuthor').value=d.author||'';
+          document.getElementById('tCategory').value=d.category||'';
+          coverBase64 = d.coverImage || '';
+          pdfBase64 = d.pdfBase64 || '';
+          coverPreview.innerHTML = coverBase64? `<img src="${coverBase64}" class="pdf-preview">` : '';
+          pdfPreview.innerHTML = pdfBase64? `<div class="small-note">Existing PDF attached</div>` : '';
+        }
+      });
+    });
+  }
+}
+
+// save ebook
+document.getElementById('ebookForm').addEventListener('submit', async (ev)=>{
+  ev.preventDefault();
+  const title = document.getElementById('tTitle').value.trim();
+  const author = document.getElementById('tAuthor').value.trim();
+  const category = document.getElementById('tCategory').value.trim();
+  if(!title||!author){ alert('Title and author required'); return; }
+  try {
+    if(editingId){
+      await updateDoc(doc(db,'ebooks',editingId), { title, author, category, coverImage: coverBase64||'', pdfBase64: pdfBase64||'', addedBy: currentLibrarian });
+      showNotification('eBook updated');
+    } else {
+      // create
+      await addDoc(collection(db,'ebooks'), { title, author, category, coverImage: coverBase64||'', pdfBase64: pdfBase64||'', addedBy: currentLibrarian, createdAt: new Date().toISOString() });
+      showNotification('eBook added');
+    }
+    formCard.style.display='none'; editingId=null;
+    loadTable();
+  } catch(err){ console.error(err); alert('Save failed. Check console.'); }
+});
+
+// load table
+async function loadTable(){
+  const tbody = document.getElementById('ebooksTable');
+  const snap = await getDocs(collection(db,'ebooks'));
+  const rows = snap.docs.map(d=>({ id:d.id, ...d.data() }));
+  tbody.innerHTML = '';
+  if(rows.length===0) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">No eBooks.</td></tr>'; return; }
+  rows.forEach(r=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="width:76px;cursor:pointer;"><img src="${r.coverImage||''}" class="cover-thumb" data-id="${r.id}"></td>
+      <td>${escapeHtml(r.title)}</td>
+      <td>${escapeHtml(r.author||'—')}</td>
+      <td>${escapeHtml(r.category||'—')}</td>
+      <td>${escapeHtml(r.addedBy||'—')}</td>
+      <td class="td-actions">
+        <button class="btn btn-ghost btn-preview" data-id="${r.id}">Preview</button>
+        <button class="btn btn-ghost btn-edit" data-id="${r.id}">Edit</button>
+        <button class="btn btn-ghost btn-delete" data-id="${r.id}">Delete</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+
+  // bindings
+  tbody.querySelectorAll('.btn-preview').forEach(b=> b.addEventListener('click', async ()=>{
+    const id = b.dataset.id;
+    const docSnap = (await getDocs(collection(db,'ebooks'))).docs.find(d=>d.id===id);
+    if(!docSnap) return alert('Missing doc');
+    const d = docSnap.data();
+    const html = `<h3>${escapeHtml(d.title)}</h3><p><strong>Author:</strong> ${escapeHtml(d.author||'—')}</p><p><strong>Category:</strong> ${escapeHtml(d.category||'—')}</p>
+                  ${d.coverImage? `<img src="${d.coverImage}" style="max-width:220px;display:block;margin-bottom:12px;" />` : ''}
+                  ${d.pdfBase64? `<div><strong>PDF attached:</strong><br><button id="openPdf" class="btn btn-primary">Open PDF (view-only)</button></div>` : '<div class="small-note">No PDF attached</div>'}`;
+    document.getElementById('modalBody').innerHTML = html;
+    document.getElementById('modal').style.display='flex';
+    // open pdf button
+    document.getElementById('openPdf')?.addEventListener('click', ()=>{
+      // create blob and open in new modal iframe (librarian preview)
+      try {
+        const idx = d.pdfBase64.indexOf(','); const base = (idx>=0)? d.pdfBase64.split(',')[1]: d.pdfBase64;
+        const byteChars = atob(base);
+        const byteNumbers = new Array(byteChars.length);
+        for(let i=0;i<byteChars.length;i++) byteNumbers[i]=byteChars.charCodeAt(i);
+        const u8 = new Uint8Array(byteNumbers); const blob = new Blob([u8],{type:'application/pdf'});
+        const url = URL.createObjectURL(blob);
+        document.getElementById('modalBody').innerHTML += `<iframe src="${url}" style="width:100%;height:70vh;border:0;"></iframe>`;
+      } catch(err){ alert('Failed to open PDF (maybe too large).'); }
+    });
+  }));
+
+  tbody.querySelectorAll('.btn-edit').forEach(b=> b.addEventListener('click', ()=> openForm(b.dataset.id)));
+  tbody.querySelectorAll('.btn-delete').forEach(b=> b.addEventListener('click', async ()=>{
+    if(!confirm('Delete this eBook?')) return;
+    try{ await deleteDoc(doc(db,'ebooks',b.dataset.id)); showNotification('Deleted'); loadTable(); } catch(e){ alert('Delete failed'); console.error(e); }
+  }));
+
+  // cover thumbnail click to full preview
+  tbody.querySelectorAll('img.cover-thumb').forEach(img => img.addEventListener('click', ()=> {
+    if(!img.src) return;
+    document.getElementById('modalBody').innerHTML = `<img src="${img.src}" style="max-width:90vw;max-height:90vh;">`;
+    document.getElementById('modal').style.display='flex';
+  }));
+}
+
+document.getElementById('modalClose').addEventListener('click', ()=> { document.getElementById('modal').style.display='none'; });
+
+// logout
+document.getElementById('logout').addEventListener('click', async ()=>{ await signOut(auth); window.location.href='login.html'; });
+
+// small helpers
+function escapeHtml(s){ if(s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+function showNotification(t){ const n=document.createElement('div'); n.className='notify'; n.innerText=t; document.getElementById('notifications').appendChild(n); setTimeout(()=>n.remove(),4500); }
+
+</script>
+</body>
+</html>

@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Loan Requests — Brackenhurst Library</title>
+  <link rel="stylesheet" href="css/site.css" />
+  <style>
+    /* Basic styles for table and buttons */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 10px;
+      text-align: left;
+      border: 1px solid #ddd;
+    }
+    th {
+      background-color: #f4f4f4;
+    }
+    .btn-approve, .btn-deny {
+      padding: 8px 16px;
+      border: none;
+      cursor: pointer;
+      color: white;
+      font-size: 14px;
+      border-radius: 4px;
+      margin: 5px;
+    }
+    .btn-approve {
+      background-color: #4CAF50; /* Green */
+    }
+    .btn-approve:hover {
+      background-color: #45a049;
+    }
+    .btn-deny {
+      background-color: #f44336; /* Red */
+    }
+    .btn-deny:hover {
+      background-color: #e41f1f;
+    }
+    .search-bar {
+      margin-bottom: 10px;
+    }
+    .search-bar input {
+      padding: 8px;
+      width: 300px;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+    }
+    .no-results {
+      text-align: center;
+      font-style: italic;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav">
+          <a href="librarian-dashboard.html">Dashboard</a>
+          <a href="librarian-books.html">Books</a>
+          <a href="librarian-ebooks.html">eBooks</a>
+          <a href="ebook-subscriptions.html">eBook Subscriptions</a>
+          <a href="loan-subscriptions.html">Loan Subscriptions</a>
+          <a href="librarian-loans.html" class="active">Loans</a>
+          <a href="librarian-members.html">Members</a>
+          <a href="librarian-logs.html">Logs</a>
+        </nav>
+      </div>
+      <div class="small">Logged in as Librarian</div>
+    </aside>
+
+    <!-- Main -->
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">Loan Requests</div>
+          <div class="small">Track and manage loan requests</div>
+        </div>
+        <div class="row">
+          <button id="logout" class="btn">Logout</button>
+        </div>
+      </div>
+
+      <!-- Loan Requests Table -->
+      <section style="margin-top: 10px;">
+        <h3 style="margin-bottom:10px;">Loan Status</h3>
+        <div class="search-bar">
+          <input type="text" id="searchInput" placeholder="Search by book title, user name, or email" onkeyup="searchLoanRequests()">
+        </div>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Book Title</th>
+              <th>User Name</th>
+              <th>User Email</th>
+              <th>Status</th>
+              <th>Reserved Until</th>
+              <th>Requested</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="loanRequestsTable">
+            <tr><td colspan="7" style="text-align:center;">Loading loan requests...</td></tr>
+          </tbody>
+        </table>
+        <p id="noResultsMessage" class="no-results" style="display:none;">No results found.</p>
+      </section>
+    </main>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+    import { getFirestore, collection, query, where, getDocs, updateDoc, doc, serverTimestamp, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+    // Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+      authDomain: "brackenhurstsystem.firebaseapp.com",
+      projectId: "brackenhurstsystem",
+      storageBucket: "brackenhurstsystem.appspot.com",
+      messagingSenderId: "98472895167",
+      appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+    };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    let currentUser = null;
+
+    // Auth listener
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return window.location.href = "login.html";
+      currentUser = user;
+      loadLoanRequests();
+    });
+
+    // Load loan requests for librarian
+    async function loadLoanRequests() {
+      const loanRef = collection(db, "loans");
+      const q = query(loanRef, where("status", "==", "Reserved"));
+      onSnapshot(q, async (querySnapshot) => {
+        const tbody = document.getElementById("loanRequestsTable");
+        tbody.innerHTML = "";  // Clear table content
+
+        if (querySnapshot.empty) {
+          console.log("No loan requests found.");
+          tbody.innerHTML = "<tr><td colspan='7' style='text-align:center;'>No loan requests found.</td></tr>";
+          return;
+        }
+
+        // Fetch each loan request and its associated user's email
+        for (const docSnap of querySnapshot.docs) {
+          const loanData = docSnap.data();
+          const userId = loanData.userId;
+          const reservedUntil = loanData.reservedUntil ? new Date(loanData.reservedUntil) : "N/A";
+
+          // Fetch user email from the users collection
+          const userRef = doc(db, "users", userId);
+          const userSnap = await getDoc(userRef);
+          const userEmail = userSnap.exists() ? userSnap.data().email : "N/A";  // Default to "N/A" if email not found
+
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${loanData.bookTitle}</td>
+            <td>${loanData.userName}</td>
+            <td>${userEmail}</td>
+            <td>${loanData.status}</td>
+            <td>${reservedUntil.toLocaleString()}</td>
+            <td>${loanData.requestedAt ? new Date(loanData.requestedAt).toLocaleString() : "N/A"}</td>
+            <td>
+              <button class="btn-approve" data-id="${docSnap.id}">Approve</button>
+              <button class="btn-deny" data-id="${docSnap.id}">Deny</button>
+            </td>
+          `;
+          tbody.appendChild(row);
+        }
+
+        bindApproveButtons();
+        bindDenyButtons();
+      });
+    }
+
+    // Bind actions on approve button
+    function bindApproveButtons() {
+      document.querySelectorAll(".btn-approve").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          const loanId = e.target.dataset.id;
+          await updateDoc(doc(db, "loans", loanId), {
+            status: "Borrowed",
+            borrowedAt: serverTimestamp(),
+          });
+          alert("Loan approved. Status updated to Borrowed.");
+        });
+      });
+    }
+
+    // Bind actions on deny button
+    function bindDenyButtons() {
+      document.querySelectorAll(".btn-deny").forEach(btn => {
+        btn.addEventListener("click", async (e) => {
+          const loanId = e.target.dataset.id;
+          await updateDoc(doc(db, "loans", loanId), {
+            status: "Denied",
+            deniedAt: serverTimestamp(),
+          });
+          alert("Loan denied.");
+        });
+      });
+    }
+
+    // Search functionality
+    function searchLoanRequests() {
+      const input = document.getElementById('searchInput').value.toLowerCase();
+      const rows = document.getElementById("loanRequestsTable").getElementsByTagName("tr");
+      let found = false;
+
+      Array.from(rows).forEach(row => {
+        const bookTitle = row.cells[0] ? row.cells[0].textContent.toLowerCase() : '';
+        const userName = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
+        const userEmail = row.cells[2] ? row.cells[2].textContent.toLowerCase() : '';
+
+        if (bookTitle.includes(input) || userName.includes(input) || userEmail.includes(input)) {
+          row.style.display = "";
+          found = true;
+        } else {
+          row.style.display = "none";
+        }
+      });
+
+      // Show "No results found" if no rows match the search query
+      const noResultsMessage = document.getElementById('noResultsMessage');
+      if (!found) {
+        noResultsMessage.style.display = 'block';
+      } else {
+        noResultsMessage.style.display = 'none';
+      }
+    }
+
+    // Logout action
+    document.getElementById("logout").addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "login.html";
+    });
+  </script>
+</body>
+</html>

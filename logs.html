@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>System Logs — Brackenhurst</title>
+<link rel="stylesheet" href="css/site.css" />
+<style>
+  .log-row:hover { background-color: #f3f4f6; }
+  .btn-reverse {
+    background-color: #e0e7ff;
+    color: #1e3a8a;
+    border: none;
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+  }
+  .btn-reverse:hover { background-color: #c7d2fe; }
+  #filterBar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  #timeFilter, #searchInput {
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid #d1d5db;
+  }
+  #refreshBtn {
+    background:#4f46e5; color:#fff; border:none; border-radius:6px;
+    padding:6px 10px; cursor:pointer;
+  }
+  #refreshBtn:hover { background:#4338ca; }
+</style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav">
+          <a href="admin-dashboard.html">Dashboard</a>
+          <a href="books.html">Books</a>
+          <a href="users.html">Users</a>
+          <a href="reports.html">Reports</a>
+          <a href="logs.html" class="active">System Logs</a>
+        </nav>
+      </div>
+      <div class="small">Logged in as Admin</div>
+    </aside>
+
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">System Logs</div>
+          <div class="small">Audit trail of admin actions (reversible)</div>
+        </div>
+        <div class="row"><button id="logout" class="btn">Logout</button></div>
+      </div>
+
+      <section style="margin-top: 10px;">
+        <div id="filterBar">
+          <select id="timeFilter">
+            <option value="all">All Time</option>
+            <option value="1">Last 1 Day</option>
+            <option value="7">Last 7 Days</option>
+            <option value="21">Last 21 Days</option>
+            <option value="90">Last 3 Months</option>
+          </select>
+          <input type="text" id="searchInput" placeholder="Search admin, action, or details..." />
+          <button id="refreshBtn">Refresh</button>
+        </div>
+
+        <table class="table">
+          <thead>
+            <tr><th>Timestamp</th><th>Admin</th><th>Action</th><th>Details</th><th>Reverse</th></tr>
+          </thead>
+          <tbody id="logsTable">
+            <tr><td colspan="5" style="text-align:center;">Loading logs...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+import { getFirestore, collection, query, orderBy, getDocs, updateDoc, doc, addDoc } 
+  from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+// Firebase Config
+const firebaseConfig = {
+  apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+  authDomain: "brackenhurstsystem.firebaseapp.com",
+  projectId: "brackenhurstsystem",
+  storageBucket: "brackenhurstsystem.appspot.com",
+  messagingSenderId: "98472895167",
+  appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let allLogs = [];
+
+// Auth Guard
+onAuthStateChanged(auth, async (user) => {
+  if (!user) return window.location.href = "login.html";
+  loadLogs();
+});
+
+// Load Logs
+async function loadLogs() {
+  const q = query(collection(db, "logs"), orderBy("time", "desc"));
+  const snap = await getDocs(q);
+  allLogs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  updateFiltered();
+}
+
+// Render Logs Table
+function renderLogs(logs) {
+  const tbody = document.getElementById("logsTable");
+  tbody.innerHTML = "";
+
+  if (logs.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No logs found for this period.</td></tr>`;
+    return;
+  }
+
+  logs.forEach(log => {
+    const row = document.createElement("tr");
+    row.classList.add("log-row");
+    row.innerHTML = `
+      <td>${new Date(log.time).toLocaleString()}</td>
+      <td>${log.admin}</td>
+      <td>${log.action}</td>
+      <td>${log.details}</td>
+      <td>
+        ${log.targetUserId 
+          ? `<button class="btn-reverse" data-id="${log.targetUserId}" data-action="${log.action}">Reverse</button>`
+          : `<span class="small">—</span>`}
+      </td>
+    `;
+    tbody.appendChild(row);
+  });
+
+  attachReverseHandlers();
+}
+
+// Filtering
+function updateFiltered() {
+  const search = document.getElementById("searchInput").value.toLowerCase();
+  const duration = document.getElementById("timeFilter").value;
+  const now = new Date();
+
+  const filtered = allLogs.filter(log => {
+    // Time filter
+    let withinTime = true;
+    if (duration !== "all") {
+      const cutoff = new Date(now.getTime() - parseInt(duration) * 24 * 60 * 60 * 1000);
+      withinTime = new Date(log.time) >= cutoff;
+    }
+
+    // Text search
+    const matchesSearch =
+      log.admin?.toLowerCase().includes(search) ||
+      log.action?.toLowerCase().includes(search) ||
+      log.details?.toLowerCase().includes(search);
+
+    return withinTime && matchesSearch;
+  });
+
+  renderLogs(filtered);
+}
+
+// Event Listeners for filters
+document.getElementById("searchInput").addEventListener("input", updateFiltered);
+document.getElementById("timeFilter").addEventListener("change", updateFiltered);
+document.getElementById("refreshBtn").addEventListener("click", loadLogs);
+
+// Reverse Logic
+function attachReverseHandlers() {
+  document.querySelectorAll(".btn-reverse").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const userId = btn.dataset.id;
+      const action = btn.dataset.action;
+      if (!userId) return alert("Cannot determine affected user.");
+
+      try {
+        if (action.includes("Approved")) {
+          await updateDoc(doc(db, "users", userId), { status: "pending" });
+          await addLog("Reversed Approval", `Restored ${userId} to pending`, userId);
+        } else if (action.includes("Role Change")) {
+          await updateDoc(doc(db, "users", userId), { role: "User" });
+          await addLog("Reversed Role Change", `Restored ${userId} role to User`, userId);
+        } else if (action.includes("Disabled")) {
+          await updateDoc(doc(db, "users", userId), { status: "approved" });
+          await addLog("Reversed Disable", `Re-enabled ${userId}`, userId);
+        } else {
+          alert("This action cannot be reversed.");
+          return;
+        }
+        alert("✅ Action reversed successfully!");
+        loadLogs();
+      } catch (e) {
+        console.error("Reverse error:", e);
+        alert("Error reversing action: " + e.message);
+      }
+    });
+  });
+}
+
+// Add Log
+async function addLog(action, details, targetUserId = null) {
+  await addDoc(collection(db, "logs"), {
+    time: new Date().toISOString(),
+    admin: "System Auto",
+    action,
+    details,
+    targetUserId
+  });
+}
+
+// Logout
+document.getElementById("logout").addEventListener("click", async () => {
+  await signOut(auth);
+  window.location.href = "login.html";
+});
+</script>
+</body>
+</html>

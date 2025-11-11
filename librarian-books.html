@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Books — Brackenhurst Librarian</title>
+  <link rel="stylesheet" href="css/site.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav">
+          <a href="librarian-dashboard.html">Dashboard</a>
+          <a href="librarian-books.html" class="active">Books</a>
+          <a href="librarian-ebooks.html">eBooks</a>
+          <a href="ebook-subscriptions.html">eBook Subscriptions</a>
+          <a href="loan-subscriptions.html">Loan Subscriptions</a>
+          <a href="librarian-loans.html">Loans</a>
+          <a href="librarian-members.html">Members</a>
+          <a href="librarian-logs.html">Logs</a>
+        </nav>
+      </div>
+      <div class="small">Logged in as Librarian</div>
+    </aside>
+
+    <!-- Main -->
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">Library Books</div>
+          <div class="small">Manage physical books and catalog entries</div>
+        </div>
+        <div class="row">
+          <button id="btnAddBook" class="btn btn-primary">Add Book</button>
+          <button id="logout" class="btn">Logout</button>
+        </div>
+      </div>
+
+      <!-- Add/Edit Form -->
+      <div id="bookForm" class="card" style="display:none; margin:15px 0;">
+        <h3 id="formTitle">Add New Book</h3>
+        <form id="bookEditor">
+          <input type="text" id="bookTitle" placeholder="Book title" required />
+          <input type="text" id="bookAuthor" placeholder="Author name" required />
+          <input type="text" id="bookCategory" placeholder="Category" required />
+          <input type="number" id="bookCopies" placeholder="Available copies" required />
+          <label>Upload Book Cover:</label>
+          <input type="file" id="bookCover" accept="image/*" />
+          <div id="coverPreview" style="margin-top:10px;"></div>
+          <button type="submit" class="btn btn-primary" id="saveBookBtn">Save Book</button>
+          <button type="button" class="btn btn-ghost" id="cancelEdit">Cancel</button>
+        </form>
+      </div>
+
+      <!-- Books Table -->
+      <section>
+        <h3>Books List</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Cover</th>
+              <th>Title</th>
+              <th>Author</th>
+              <th>Category</th>
+              <th>Copies</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="booksTable">
+            <tr><td colspan="6" style="text-align:center;">Loading books...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+    import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+    // 🔥 Firebase Configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+      authDomain: "brackenhurstsystem.firebaseapp.com",
+      projectId: "brackenhurstsystem",
+      storageBucket: "brackenhurstsystem.appspot.com",
+      messagingSenderId: "98472895167",
+      appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    let currentLibrarian = null;
+    let editMode = null;
+    let coverBase64 = "";
+
+    // ✅ Check Authentication and Role
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return window.location.href = "login.html";
+
+      const res = await fetch(`https://firestore.googleapis.com/v1/projects/brackenhurstsystem/databases/(default)/documents/users/${user.uid}`);
+      const json = await res.json();
+      const data = json.fields;
+
+      if (!data || data.role.stringValue !== "Librarian") {
+        alert("Access denied — Librarian only.");
+        await signOut(auth);
+        return window.location.href = "login.html";
+      }
+
+      currentLibrarian = data.fullName.stringValue;
+      loadBooks();
+    });
+
+    // 📚 Load Books
+    async function loadBooks() {
+      const snap = await getDocs(collection(db, "books"));
+      const tbody = document.getElementById("booksTable");
+      tbody.innerHTML = "";
+
+      snap.forEach(docSnap => {
+        const book = docSnap.data();
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td><img src="${book.coverBase64 || ''}" style="width:60px;height:80px;object-fit:cover;border-radius:6px;" /></td>
+          <td>${book.title}</td>
+          <td>${book.author}</td>
+          <td>${book.category}</td>
+          <td>${book.copies}</td>
+          <td>
+            <button class="btn btn-ghost btn-edit" data-id="${docSnap.id}">Edit</button>
+            <button class="btn btn-ghost btn-delete" data-id="${docSnap.id}">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+      bindBookButtons();
+    }
+
+    // 🎯 Add/Edit/Delete Book Buttons
+    function bindBookButtons() {
+      document.querySelectorAll(".btn-edit").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          editMode = btn.dataset.id;
+          const bookRef = doc(db, "books", editMode);
+          const snap = await getDocs(collection(db, "books"));
+          snap.forEach(b => {
+            if (b.id === editMode) {
+              const book = b.data();
+              document.getElementById("bookTitle").value = book.title;
+              document.getElementById("bookAuthor").value = book.author;
+              document.getElementById("bookCategory").value = book.category;
+              document.getElementById("bookCopies").value = book.copies;
+              if (book.coverBase64) {
+                document.getElementById("coverPreview").innerHTML = `<img src="${book.coverBase64}" style="width:100px;height:140px;border-radius:6px;" />`;
+                coverBase64 = book.coverBase64;
+              }
+            }
+          });
+          document.getElementById("formTitle").innerText = "Edit Book";
+          document.getElementById("bookForm").style.display = "block";
+        });
+      });
+
+      document.querySelectorAll(".btn-delete").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          await deleteDoc(doc(db, "books", btn.dataset.id));
+          await addLog("Deleted book", btn.dataset.id);
+          alert("Book deleted.");
+          loadBooks();
+        });
+      });
+    }
+
+    // 🖼️ Convert Image to Base64
+    document.getElementById("bookCover").addEventListener("change", function() {
+      const file = this.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        coverBase64 = reader.result;
+        document.getElementById("coverPreview").innerHTML = `<img src="${coverBase64}" style="width:100px;height:140px;object-fit:cover;border-radius:6px;" />`;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    // 🧾 Add/Edit Form
+    document.getElementById("btnAddBook").addEventListener("click", () => {
+      editMode = null;
+      document.getElementById("bookForm").style.display = "block";
+      document.getElementById("bookEditor").reset();
+      document.getElementById("formTitle").innerText = "Add New Book";
+      document.getElementById("coverPreview").innerHTML = "";
+      coverBase64 = "";
+    });
+
+    document.getElementById("cancelEdit").addEventListener("click", () => {
+      document.getElementById("bookForm").style.display = "none";
+    });
+
+    document.getElementById("bookEditor").addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const title = document.getElementById("bookTitle").value.trim();
+      const author = document.getElementById("bookAuthor").value.trim();
+      const category = document.getElementById("bookCategory").value.trim();
+      const copies = parseInt(document.getElementById("bookCopies").value);
+
+      if (editMode) {
+        await updateDoc(doc(db, "books", editMode), { title, author, category, copies, coverBase64 });
+        await addLog(`Updated book: ${title}`, editMode);
+        alert("Book updated successfully.");
+      } else {
+        await addDoc(collection(db, "books"), {
+          title, author, category, copies, coverBase64,
+          addedBy: currentLibrarian,
+          createdAt: new Date().toISOString()
+        });
+        await addLog(`Added new book: ${title}`);
+        alert("Book added successfully.");
+      }
+
+      document.getElementById("bookForm").style.display = "none";
+      loadBooks();
+    });
+
+    // 🪵 Log Activity
+    async function addLog(action, bookId = null) {
+      await addDoc(collection(db, "logs-librarian"), {
+        time: new Date().toISOString(),
+        librarian: currentLibrarian,
+        action,
+        bookId
+      });
+    }
+
+    // 🚪 Logout
+    document.getElementById("logout").addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "login.html";
+    });
+  </script>
+</body>
+</html>

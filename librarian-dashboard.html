@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Librarian — Brackenhurst (Dashboard)</title>
+
+<!-- Keep your main site CSS for overall look -->
+<link rel="stylesheet" href="css/site.css" />
+
+<!-- Chart library -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+<!-- Small page-specific styles (responsive; charts right below stats) -->
+<style>
+  :root { --accent: #4f46e5; --muted:#6b7280; --card-bg:#fff; --glass:#f8fafc; }
+  body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:#f1f5f9; margin:0; color:#0f172a; }
+  .app-shell { display:flex; min-height:100vh; }
+  .app-sidebar { width:220px; background:#eef2ff; padding:18px; box-shadow: 1px 0 0 rgba(0,0,0,0.02); }
+  .brand { font-weight:700; color:var(--accent); font-size:20px; margin-bottom:18px; }
+  .nav a { display:block; padding:10px 6px; color:#475569; text-decoration:none; border-radius:6px; margin-bottom:6px; }
+  .nav a.active, .nav a:hover { background:transparent; color:var(--accent); font-weight:600; }
+  .app-main { flex:1; padding:20px; }
+  .header-row { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+  .page-title { font-size:20px; font-weight:700; }
+  .small { color:var(--muted); font-size:13px; }
+  .btn { padding:8px 10px; border-radius:8px; border:1px solid transparent; cursor:pointer; background:#fff; }
+  .btn-primary { background:var(--accent); color:white; border:none; }
+  .quick-grid { display:flex; gap:12px; margin-top:12px; flex-wrap:wrap; }
+  .card { background:var(--card-bg); padding:14px; border-radius:10px; box-shadow:0 1px 8px rgba(15,23,42,0.04); min-width:160px; flex:1; }
+  .stats-number { font-size:20px; font-weight:700; margin-top:8px; }
+  .charts-row { display:flex; gap:18px; margin-top:16px; flex-wrap:wrap; align-items:stretch; }
+  .chart-card { flex:1 1 320px; min-width:280px; background:var(--card-bg); padding:12px; border-radius:10px; }
+  .table { width:100%; border-collapse:collapse; margin-top:10px; }
+  .table th, .table td { padding:8px 10px; border-bottom:1px solid #eef2f6; text-align:left; vertical-align:middle; }
+  .small-note { color:var(--muted); font-size:13px; }
+  .notify { background:#fef3c7; padding:8px; border-radius:8px; margin-bottom:8px; }
+  .banner { background:#fff7ed; border-left:4px solid #f59e0b; padding:10px; border-radius:8px; margin-top:10px; }
+  .badge { display:inline-block; padding:4px 8px; border-radius:8px; font-weight:700; font-size:12px; }
+  .badge.overdue { background:#fee2e2; color:#991b1b; }
+  .cover-thumb { width:44px; height:60px; object-fit:cover; border-radius:6px; }
+  .modal { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.5); z-index:9999; padding:12px; }
+  .modal .panel { max-width:900px; width:100%; background:white; padding:16px; border-radius:8px; max-height:90vh; overflow:auto; }
+  .hidden { display:none; }
+
+  /* Responsive: stack charts on smaller screens */
+  @media (max-width:900px) {
+    .app-sidebar { display:none; } /* optional: hide sidebar on very small screens */
+    .charts-row { flex-direction:column; }
+    .quick-grid { flex-direction:column; }
+  }
+
+  /* utility */
+  .muted { color:var(--muted); font-size:13px; }
+  .link { color:var(--accent); text-decoration:underline; cursor:pointer; }
+</style>
+</head>
+<body>
+  <!-- top-level shell -->
+  <div class="app-shell">
+
+    <!-- Sidebar: links to other pages (we removed Analytics link as requested) -->
+    <aside class="app-sidebar" aria-label="Main navigation">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav" role="navigation">
+          <a href="librarian-dashboard.html" class="active">Dashboard</a>
+          <a href="librarian-books.html">Books</a>
+          <a href="ebooks.html">eBooks</a>
+          <a href="ebook-subscriptions.html">eBook Subscriptions</a>
+          <a href="loan-subscriptions.html">Loan Subscriptions</a>
+          <a href="loans.html">Loans</a>
+          <a href="members.html">Members</a>
+          <a href="librarian-logs.html">Logs</a>
+        </nav>
+      </div>
+      <div style="margin-top:14px;" class="small">Logged in as <span id="roleLabel">Librarian</span></div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">Librarian Control Center</div>
+          <div class="small">Overview • quick actions • reservations & pending approvals</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button id="btnOpenEbookSubs" class="btn">eBook Requests</button>
+          <button id="btnOpenLoanSubs" class="btn">Loan Requests</button>
+          <button id="btnGlobalSearch" class="btn">Global Search</button>
+          <button id="logout" class="btn">Logout</button>
+        </div>
+      </div>
+
+      <!-- Notifications / banners area -->
+      <div id="notifications"></div>
+
+      <!-- Quick stats -->
+      <div class="quick-grid" id="statsGrid">
+        <div class="card">
+          <div class="small-note">Total books</div>
+          <div class="stats-number" id="statBooks">—</div>
+          <div class="muted">Physical copies in catalogue</div>
+        </div>
+
+        <div class="card">
+          <div class="small-note">Total eBooks</div>
+          <div class="stats-number" id="statEbooks">—</div>
+          <div class="muted">Digital titles</div>
+        </div>
+
+        <div class="card">
+          <div class="small-note">Active loans</div>
+          <div class="stats-number" id="statLoans">—</div>
+          <div class="muted">Currently borrowed</div>
+        </div>
+
+        <div class="card">
+          <div class="small-note">Pending eBook requests</div>
+          <div class="stats-number" id="statSubs">—</div>
+          <div class="muted">SA ID + ID card + proof required</div>
+        </div>
+      </div>
+
+      <!-- Charts directly below stats to avoid long scrolling -->
+      <div class="charts-row" aria-hidden="false">
+        <div class="chart-card card">
+          <h4 style="margin:0 0 8px 0;">Loans (last 30 days)</h4>
+          <div style="height:180px;">
+            <canvas id="chartLoans" style="width:100%; height:100%;"></canvas>
+          </div>
+        </div>
+
+        <div class="chart-card card">
+          <h4 style="margin:0 0 8px 0;">Category distribution</h4>
+          <div style="height:180px;">
+            <canvas id="chartCategories" style="width:100%; height:100%;"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick lists: expiring reservations, pending eBook & loan requests -->
+      <section style="margin-top:16px;">
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <div class="card" style="flex:1 1 420px;">
+            <h4 style="margin-top:0;">Reservations expiring soon</h4>
+            <div id="expiringList" class="muted">Loading...</div>
+          </div>
+
+          <div class="card" style="flex:1 1 420px;">
+            <h4 style="margin-top:0;">Uncollected reservations</h4>
+            <div id="uncollectedList" class="muted">Loading...</div>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:12px; margin-top:12px; flex-wrap:wrap;">
+          <div class="card" style="flex:1 1 420px;">
+            <h4 style="margin-top:0;">Pending eBook requests</h4>
+            <table class="table">
+              <thead><tr><th>User</th><th>SA ID</th><th>Requested</th><th>eBook</th></tr></thead>
+              <tbody id="pendingEbookTable"><tr><td colspan="4" style="text-align:center;">Loading...</td></tr></tbody>
+            </table>
+            <div style="margin-top:8px;"><a href="ebook-subscriptions.html" class="link">Open full eBook requests page</a></div>
+          </div>
+
+          <div class="card" style="flex:1 1 420px;">
+            <h4 style="margin-top:0;">Pending loan requests</h4>
+            <table class="table">
+              <thead><tr><th>User</th><th>Book</th><th>Requested</th><th>Action</th></tr></thead>
+              <tbody id="pendingLoanTable"><tr><td colspan="4" style="text-align:center;">Loading...</td></tr></tbody>
+            </table>
+            <div style="margin-top:8px;"><a href="loan-subscriptions.html" class="link">Open full loan requests page</a></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Recent activity + small logs preview -->
+      <section style="margin-top:16px;">
+        <div class="card">
+          <h4 style="margin-top:0;">Recent activity (librarian)</h4>
+          <table class="table">
+            <thead><tr><th>Time</th><th>Action</th><th>Details</th></tr></thead>
+            <tbody id="recentActivity"><tr><td colspan="3" style="text-align:center;">Loading...</td></tr></tbody>
+          </table>
+          <div style="margin-top:8px;"><a href="librarian-logs.html" class="link">Open logs</a></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal for image previews (ID / proof / cover) -->
+  <div id="modalPreview" class="modal hidden" aria-hidden="true">
+    <div class="panel">
+      <button id="closeModal" class="btn" style="float:right;">Close</button>
+      <div id="modalContent"></div>
+    </div>
+  </div>
+
+<script type="module">
+/*
+  librarian-dashboard.html
+  - Single-file dashboard with realtime Firestore listeners.
+  - Shows counts, charts, expiring reservations, pending requests, and a logs preview.
+  - Expects Firestore collections (document shapes noted below).
+  - Images (idCardImage / proofOfResImage / coverImage) stored as Base64 strings in documents.
+
+  Firestore collection expectations (example minimal fields):
+  - books: { title, author, category, copies, coverImage }
+  - ebooks: { title, author, category, coverImage }
+  - loans: { userId, userName, bookId, bookTitle, requestedAt, status, reservedUntil, issuedAt, dueDate, returnedAt }
+  - subscriptions: (ebook access requests) { userId, userName, saId, idCardImage (Base64), proofOfResImage (Base64), ebookId, ebookTitle, requestedAt, status }
+  - loanSubscriptions: (book borrow requests) { userId, userName, proofOfResImage (Base64), bookId, bookTitle, requestedAt, status }
+  - users: { fullName, email, role, saId, ebookAccess: true/false }
+  - logs-librarian: { time, admin (librarian name), role: "Librarian", action, details, targetUserId, targetBookId, targetEbookId }
+*/
+
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+import {
+  getAuth, onAuthStateChanged, signOut
+} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+import {
+  getFirestore, collection, doc, getDoc, getDocs, addDoc, updateDoc, deleteDoc,
+  onSnapshot, query, orderBy, where, limit
+} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+// ---------- Firebase config ----------
+// replace with your own config if different
+const firebaseConfig = {
+  apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+  authDomain: "brackenhurstsystem.firebaseapp.com",
+  projectId: "brackenhurstsystem",
+  storageBucket: "brackenhurstsystem.appspot.com",
+  messagingSenderId: "98472895167",
+  appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// ---------- State ----------
+let currentLibrarian = null;
+let allBooks = [], allEbooks = [], allUsers = [], allLoans = [], allSubs = [], allLoanSubs = [];
+
+// small helper: safe inner text
+function escapeHtml(s) { if (s == null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+// notification helper
+function showNotification(text) {
+  const n = document.createElement("div");
+  n.className = "notify";
+  n.innerText = text;
+  const box = document.getElementById("notifications");
+  box.appendChild(n);
+  setTimeout(()=> n.remove(), 5500);
+}
+
+// add librarian log into logs-librarian collection
+async function addLog(action, details, targetUserId=null, targetBookId=null, targetEbookId=null) {
+  try {
+    await addDoc(collection(db, "logs-librarian"), {
+      time: new Date().toISOString(),
+      admin: currentLibrarian || "Librarian",
+      role: "Librarian",
+      action,
+      details,
+      targetUserId: targetUserId || null,
+      targetBookId: targetBookId || null,
+      targetEbookId: targetEbookId || null
+    });
+  } catch (e) { console.error("log error", e); }
+}
+
+// modal preview functions (images / html)
+function showModal(html) {
+  document.getElementById("modalContent").innerHTML = html;
+  const m = document.getElementById("modalPreview");
+  m.classList.remove("hidden"); m.setAttribute("aria-hidden","false");
+}
+function closeModal() {
+  const m = document.getElementById("modalPreview");
+  m.classList.add("hidden"); m.setAttribute("aria-hidden","true");
+}
+document.getElementById("closeModal").addEventListener("click", closeModal);
+document.getElementById("modalPreview").addEventListener("click", (e) => { if (e.target === document.getElementById("modalPreview")) closeModal(); });
+
+// ---------- Auth + role check ----------
+onAuthStateChanged(auth, async user => {
+  if (!user) return window.location.href = "login.html";
+  const snap = await getDoc(doc(db, "users", user.uid));
+  if (!snap.exists()) { alert("Missing user profile. Contact admin."); await signOut(auth); return; }
+  const data = snap.data();
+  if (data.role !== "Librarian") { alert("Access denied — Librarians only."); await signOut(auth); return; }
+
+  currentLibrarian = data.fullName || "Librarian";
+  document.getElementById("roleLabel").innerText = `${data.role} • ${currentLibrarian}`;
+
+  // wire realtime listeners & initial loads
+  wireRealtime();
+  loadInitialCollections();
+  initCharts();
+});
+
+// ---------- Realtime listeners to keep dashboard live ----------
+function wireRealtime() {
+  // books
+  onSnapshot(collection(db, "books"), snap => {
+    allBooks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    document.getElementById("statBooks").innerText = allBooks.length || 0;
+    computeCategoryChart();
+  });
+
+  // ebooks
+  onSnapshot(collection(db, "ebooks"), snap => {
+    allEbooks = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    document.getElementById("statEbooks").innerText = allEbooks.length || 0;
+  });
+
+  // loans
+  onSnapshot(collection(db, "loans"), snap => {
+    allLoans = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    document.getElementById("statLoans").innerText = allLoans.filter(l => l.status === "Borrowed" || l.status === "Reserved").length || 0;
+    renderExpiringReservations();
+    renderUncollected();
+    computeLoansChart();
+    renderPendingLoanPreview();
+  });
+
+  // ebook subscription requests (collection name: subscriptions)
+  onSnapshot(collection(db, "subscriptions"), snap => {
+    allSubs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    document.getElementById("statSubs").innerText = allSubs.filter(s => s.status === "Pending").length || 0;
+    renderPendingEbookPreview();
+  });
+
+  // loan subscription requests (collection name: loanSubscriptions)
+  onSnapshot(collection(db, "loanSubscriptions"), snap => {
+    allLoanSubs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderPendingLoanPreview();
+  });
+
+  // logs-librarian preview (show 6 latest)
+  const logsQuery = query(collection(db, "logs-librarian"), orderBy("time", "desc"), limit(6));
+  onSnapshot(logsQuery, snap => {
+    const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderRecentActivity(rows);
+  });
+
+  // users (for name lookup)
+  onSnapshot(collection(db, "users"), snap => {
+    allUsers = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // we don't render full list here, but data is available for previews
+  });
+}
+
+// ---------- Initial collection load (once) ----------
+async function loadInitialCollections() {
+  try {
+    const b = await getDocs(collection(db, "books"));
+    allBooks = b.docs.map(d => ({ id:d.id, ...d.data() }));
+    document.getElementById("statBooks").innerText = allBooks.length || 0;
+
+    const e = await getDocs(collection(db, "ebooks"));
+    allEbooks = e.docs.map(d => ({ id:d.id, ...d.data() }));
+    document.getElementById("statEbooks").innerText = allEbooks.length || 0;
+
+    const s = await getDocs(collection(db, "subscriptions"));
+    allSubs = s.docs.map(d => ({ id:d.id, ...d.data() }));
+    document.getElementById("statSubs").innerText = allSubs.filter(x=>x.status==="Pending").length || 0;
+
+    const ls = await getDocs(collection(db, "loanSubscriptions"));
+    allLoanSubs = ls.docs.map(d=>({ id:d.id, ...d.data() }));
+
+    const ln = await getDocs(collection(db,"loans"));
+    allLoans = ln.docs.map(d=>({ id:d.id, ...d.data() }));
+    document.getElementById("statLoans").innerText = allLoans.filter(l => l.status === "Borrowed" || l.status === "Reserved").length || 0;
+
+    computeLoansChart();
+    computeCategoryChart();
+    renderPendingEbookPreview();
+    renderPendingLoanPreview();
+    renderExpiringReservations();
+    renderUncollected();
+  } catch (err) { console.error("initial load error", err); }
+}
+
+// ---------- Helper date functions ----------
+function isTodayOrTomorrow(date) {
+  if (!date) return null;
+  const d = new Date(date);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tmr = new Date(today); tmr.setDate(tmr.getDate()+1);
+  if (d >= today && d < new Date(today.getTime()+24*3600000)) return 'today';
+  if (d >= tmr && d < new Date(tmr.getTime()+24*3600000)) return 'tomorrow';
+  return null;
+}
+function formatDateTimeISO(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  return d.toLocaleString();
+}
+function formatShortDate(dateStr) {
+  if (!dateStr) return '—';
+  const d = new Date(dateStr);
+  return d.toLocaleDateString();
+}
+
+// ---------- Render lists / previews ----------
+
+// Expiring reservations (reservedUntil within next 24-48 hours)
+function renderExpiringReservations() {
+  const container = document.getElementById("expiringList");
+  const now = new Date();
+  const soon = allLoans.filter(l => l.status === "Reserved" && l.reservedUntil).filter(l => {
+    const d = new Date(l.reservedUntil);
+    // show reservations that expire today or tomorrow (next 48 hours)
+    return d > now && d - now <= (48*3600*1000);
+  }).sort((a,b)=> new Date(a.reservedUntil) - new Date(b.reservedUntil));
+
+  if (soon.length === 0) {
+    container.innerHTML = `<div class="muted">No reservations expiring within 48 hours.</div>`;
+    return;
+  }
+
+  const rows = soon.slice(0,6).map(l => {
+    const userName = l.userName || lookupUserName(l.userId) || '—';
+    const due = formatDateTimeISO(l.reservedUntil);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9;">
+      <div><strong>${escapeHtml(userName)}</strong><div class="small-note">${escapeHtml(l.bookTitle || '—')}</div></div>
+      <div class="muted">${escapeHtml(due)}</div>
+    </div>`;
+  }).join('');
+  container.innerHTML = rows;
+}
+
+// Uncollected reservations (status Reserved AND reservedUntil in the past)
+function renderUncollected() {
+  const container = document.getElementById("uncollectedList");
+  const now = new Date();
+  const uncol = allLoans.filter(l => l.status === "Reserved" && l.reservedUntil && new Date(l.reservedUntil) < now);
+  if (uncol.length === 0) {
+    container.innerHTML = `<div class="muted">No uncollected reservations past pickup time.</div>`;
+    return;
+  }
+  const rows = uncol.slice(0,6).map(l => {
+    const userName = l.userName || lookupUserName(l.userId) || '—';
+    const reservedUntil = formatDateTimeISO(l.reservedUntil);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #f1f5f9;">
+      <div><strong>${escapeHtml(userName)}</strong><div class="small-note">${escapeHtml(l.bookTitle || '—')}</div></div>
+      <div style="text-align:right;">
+        <div class="badge overdue">Expired</div>
+        <div class="muted" style="margin-top:6px;">${escapeHtml(reservedUntil)}</div>
+      </div>
+    </div>`;
+  }).join('');
+  container.innerHTML = rows;
+}
+
+// Pending eBook requests preview table
+function renderPendingEbookPreview() {
+  const tbody = document.getElementById("pendingEbookTable");
+  const pending = (allSubs || []).filter(s => s.status === "Pending").slice(0,6);
+  if (pending.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">No pending eBook requests.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = "";
+  pending.forEach(s => {
+    const userName = lookupUserName(s.userId) || s.userName || '—';
+    const row = document.createElement("tr");
+    row.innerHTML = `<td>${escapeHtml(userName)}</td>
+                     <td>${escapeHtml(s.saId || '—')}</td>
+                     <td>${s.requestedAt ? new Date(s.requestedAt).toLocaleString() : '—'}</td>
+                     <td>${escapeHtml(s.ebookTitle || '—')}</td>`;
+    row.addEventListener("click", async ()=> {
+      // open modal with ID & proof previews and quick link to full page
+      const htmlParts = [
+        `<h3>Subscription request</h3>`,
+        `<p><strong>User:</strong> ${escapeHtml(userName)}</p>`,
+        `<p><strong>SA ID:</strong> ${escapeHtml(s.saId || '—')}</p>`,
+        `<p><strong>Requested:</strong> ${s.requestedAt ? new Date(s.requestedAt).toLocaleString() : '—'}</p>`,
+        `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">`,
+        s.idCardImage ? `<div><strong>ID Card</strong><br/><img src="${s.idCardImage}" style="max-width:320px;max-height:320px;"/></div>` : `<div><strong>ID Card</strong><br/><span class="muted">Missing</span></div>`,
+        s.proofOfResImage ? `<div><strong>Proof of Residence</strong><br/><img src="${s.proofOfResImage}" style="max-width:320px;max-height:320px;"/></div>` : `<div><strong>Proof of Residence</strong><br/><span class="muted">Missing</span></div>`,
+        `</div>`,
+        `<div style="margin-top:12px;"><a href="ebook-subscriptions.html" class="link">Open full eBook subscriptions page</a></div>`
+      ].join("");
+      showModal(htmlParts);
+    });
+    tbody.appendChild(row);
+  });
+}
+
+// Pending loan requests preview table
+function renderPendingLoanPreview() {
+  const tbody = document.getElementById("pendingLoanTable");
+  const pending = (allLoanSubs || []).filter(s => s.status === "Pending").slice(0,6);
+  if (pending.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">No pending loan requests.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = "";
+  pending.forEach(s => {
+    const userName = lookupUserName(s.userId) || s.userName || '—';
+    const row = document.createElement("tr");
+    row.innerHTML = `<td>${escapeHtml(userName)}</td>
+                     <td>${escapeHtml(s.bookTitle || '—')}</td>
+                     <td>${s.requestedAt ? new Date(s.requestedAt).toLocaleDateString() : '—'}</td>
+                     <td><button class="btn" data-id="${s.id}">Preview</button></td>`;
+    row.querySelector('button').addEventListener("click", async () => {
+      const sdoc = await getDoc(doc(db, "loanSubscriptions", s.id));
+      if (!sdoc.exists()) { alert("Missing request"); return; }
+      const data = sdoc.data();
+      const htmlParts = [
+        `<h3>Loan request</h3>`,
+        `<p><strong>User:</strong> ${escapeHtml(userName)}</p>`,
+        `<p><strong>Book:</strong> ${escapeHtml(s.bookTitle || '—')}</p>`,
+        `<p><strong>Requested:</strong> ${s.requestedAt ? new Date(s.requestedAt).toLocaleString() : '—'}</p>`,
+        `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;">`,
+        data.proofOfResImage ? `<div><strong>Proof of Residence</strong><br/><img src="${data.proofOfResImage}" style="max-width:320px;max-height:320px;"/></div>` : `<div><strong>Proof of Residence</strong><br/><span class="muted">Missing</span></div>`,
+        `</div>`,
+        `<div style="margin-top:12px;"><a href="loan-subscriptions.html" class="link">Open full loan subscriptions page</a></div>`
+      ].join("");
+      showModal(htmlParts);
+    });
+    tbody.appendChild(row);
+  });
+}
+
+// recent activity (librarian logs preview)
+function renderRecentActivity(rows) {
+  const tbody = document.getElementById("recentActivity");
+  if (!rows || rows.length === 0) { tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;">No recent activity.</td></tr>`; return; }
+  tbody.innerHTML = "";
+  rows.forEach(r => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${r.time ? new Date(r.time).toLocaleString() : '—'}</td>
+                    <td>${escapeHtml(r.action || '—')}</td>
+                    <td>${escapeHtml(r.details || '—')}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+// helper to lookup username locally
+function lookupUserName(userId) {
+  const u = allUsers.find(x => x.id === userId);
+  return u ? u.fullName || u.email : null;
+}
+
+// ---------- Charts (loans & categories) ----------
+let chartLoans = null, chartCategories = null;
+
+function initCharts() {
+  const ctxL = document.getElementById("chartLoans").getContext("2d");
+  chartLoans = new Chart(ctxL, {
+    type: "line",
+    data: { labels: [], datasets: [{ label: "Loans", data: [], fill:false }] },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { display: true }, y: { beginAtZero: true, precision:0 } }
+    }
+  });
+
+  const ctxC = document.getElementById("chartCategories").getContext("2d");
+  chartCategories = new Chart(ctxC, {
+    type: "pie",
+    data: { labels: [], datasets: [{ data: [] }] },
+    options: { responsive:true, maintainAspectRatio:false, plugins: { legend: { position: 'right' } } }
+  });
+
+  // initial compute (if data already loaded)
+  computeLoansChart();
+  computeCategoryChart();
+}
+
+// compute loans chart over last 30 days
+function computeLoansChart() {
+  if (!chartLoans) return;
+  const days = 30;
+  const labels = [];
+  const counts = [];
+  for (let i = days-1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().slice(0,10);
+    labels.push(key);
+    const cnt = allLoans.filter(l => {
+      // count issuedAt (borrow) or requestedAt
+      const dateStr = l.issuedAt || l.requestedAt;
+      return dateStr && dateStr.slice(0,10) === key;
+    }).length;
+    counts.push(cnt);
+  }
+  chartLoans.data.labels = labels;
+  chartLoans.data.datasets[0].data = counts;
+  chartLoans.update();
+}
+
+// compute category chart for books
+function computeCategoryChart() {
+  if (!chartCategories) return;
+  const counts = {};
+  (allBooks || []).forEach(b => {
+    const c = (b.category || "Uncategorized");
+    counts[c] = (counts[c] || 0) + 1;
+  });
+  chartCategories.data.labels = Object.keys(counts);
+  chartCategories.data.datasets[0].data = Object.values(counts);
+  chartCategories.update();
+}
+
+// ---------- UI bindings ----------
+document.getElementById("btnOpenEbookSubs").addEventListener("click", ()=> window.location.href = "ebook-subscriptions.html");
+document.getElementById("btnOpenLoanSubs").addEventListener("click", ()=> window.location.href = "loan-subscriptions.html");
+document.getElementById("btnGlobalSearch").addEventListener("click", ()=> {
+  const q = prompt("Global search (book title, user name/email, loan id, ebook title):");
+  if (!q) return;
+  const ql = q.toLowerCase();
+  const foundBook = allBooks.find(b => (b.title||'').toLowerCase().includes(ql) || (b.author||'').toLowerCase().includes(ql));
+  if (foundBook) { window.location.href = "books.html"; return; }
+  const foundE = allEbooks.find(e => (e.title||'').toLowerCase().includes(ql) || (e.author||'').toLowerCase().includes(ql));
+  if (foundE) { window.location.href = "ebooks.html"; return; }
+  const foundUser = allUsers.find(u => (u.fullName||'').toLowerCase().includes(ql) || (u.email||'').toLowerCase().includes(ql));
+  if (foundUser) { window.location.href = "members.html"; return; }
+  alert("No results locally.");
+});
+
+document.getElementById("logout").addEventListener("click", async ()=> {
+  await signOut(auth);
+  window.location.href = "login.html";
+});
+
+// ---------- Small initialization: avoid race conditions ----------
+(function init() {
+  // no-op initial listeners already attached in auth flow
+})();
+
+</script>
+</body>
+</html>

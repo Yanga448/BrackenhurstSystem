@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Manage Users — Brackenhurst</title>
+  <link rel="stylesheet" href="css/site.css" />
+  <style>
+    .search-bar {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .search-bar input {
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      width: 220px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav">
+          <a href="admin-dashboard.html">Dashboard</a>
+          <a href="books.html">Books</a>
+          <a href="users.html" class="active">Users</a>
+          <a href="reports.html">Reports</a>
+          <a href="logs.html">System Logs</a>
+        </nav>
+      </div>
+      <div class="small">Logged in as Admin</div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">User Management</div>
+          <div class="small">Approve, deny or change user roles</div>
+        </div>
+        <div class="row">
+          <button id="logout" class="btn">Logout</button>
+        </div>
+      </div>
+
+      <!-- Filter + Search -->
+      <section class="filters" style="margin: 10px 0; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <label for="roleFilter" class="small">Filter by Role:</label>
+          <select id="roleFilter">
+            <option value="All">All</option>
+            <option value="Admin">Admin</option>
+            <option value="Librarian">Librarian</option>
+            <option value="User">User</option>
+            <option value="Pending">Pending</option>
+          </select>
+        </div>
+        <div class="search-bar">
+          <input type="text" id="searchUser" placeholder="Search by name or email..." />
+        </div>
+      </section>
+
+      <!-- Users Table -->
+      <section style="margin-top: 10px;">
+        <h3 style="margin-bottom:10px;">Registered Users</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Full Name</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="usersTable">
+            <tr><td colspan="5" style="text-align:center;">Loading users...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+    import { 
+      getFirestore, collection, getDocs, doc, updateDoc, deleteDoc, addDoc 
+    } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+    // Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+      authDomain: "brackenhurstsystem.firebaseapp.com",
+      projectId: "brackenhurstsystem",
+      storageBucket: "brackenhurstsystem.appspot.com",
+      messagingSenderId: "98472895167",
+      appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+    };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    let currentAdmin = null;
+    let allUsers = [];
+
+    // Auth check
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return window.location.href = "login.html";
+      const res = await fetch(`https://firestore.googleapis.com/v1/projects/brackenhurstsystem/databases/(default)/documents/users/${user.uid}`);
+      const json = await res.json();
+      const data = json.fields;
+      if (!data || data.role.stringValue !== "Admin") {
+        alert("Access denied. Admins only.");
+        return window.location.href = "login.html";
+      }
+      currentAdmin = data.fullName.stringValue;
+      loadUsers();
+    });
+
+    async function loadUsers() {
+      const snap = await getDocs(collection(db, "users"));
+      allUsers = [];
+      const tbody = document.getElementById("usersTable");
+      tbody.innerHTML = "";
+
+      snap.forEach(docSnap => {
+        const user = { id: docSnap.id, ...docSnap.data() };
+        allUsers.push(user);
+      });
+
+      displayUsers(allUsers);
+    }
+
+    function displayUsers(users) {
+      const tbody = document.getElementById("usersTable");
+      tbody.innerHTML = "";
+
+      if (users.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;">No users found.</td></tr>`;
+        return;
+      }
+
+      users.forEach(user => {
+        const row = document.createElement("tr");
+        row.dataset.role = user.role;
+        const status = user.status || "pending";
+
+        row.innerHTML = `
+          <td>${user.fullName}</td>
+          <td>${user.email}</td>
+          <td>${user.role}</td>
+          <td>${status}</td>
+          <td>
+            ${status === "pending" ? `
+              <button class="btn btn-primary btn-approve" data-id="${user.id}">Approve</button>
+              <button class="btn btn-ghost btn-deny" data-id="${user.id}">Deny</button>
+            ` : status === "disabled" ? `
+              <button class="btn btn-primary btn-enable" data-id="${user.id}">Enable</button>
+              <button class="btn btn-primary btn-change" data-id="${user.id}" data-role="${user.role}">Change Role</button>
+              <button class="btn btn-ghost btn-delete" data-id="${user.id}">Delete</button>
+            ` : `
+              <button class="btn btn-primary btn-change" data-id="${user.id}" data-role="${user.role}">Change Role</button>
+              <button class="btn btn-ghost btn-disable" data-id="${user.id}">Disable</button>
+              <button class="btn btn-ghost btn-delete" data-id="${user.id}">Delete</button>
+            `}
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+
+      applyActions();
+    }
+
+    function applyActions() {
+      // Approve user
+      document.querySelectorAll(".btn-approve").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = btn.dataset.id;
+          await updateDoc(doc(db, "users", id), { status: "approved" });
+          await addLog("Approved user", id);
+          loadUsers();
+        });
+      });
+
+      // Deny user
+      document.querySelectorAll(".btn-deny").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = btn.dataset.id;
+          await updateDoc(doc(db, "users", id), { status: "denied" });
+          await addLog("Denied user", id);
+          loadUsers();
+        });
+      });
+
+      // Change role
+      document.querySelectorAll(".btn-change").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = btn.dataset.id;
+          const newRole = prompt("Enter new role (Admin, Librarian, User):");
+          if (!newRole) return;
+          await updateDoc(doc(db, "users", id), { role: newRole });
+          await addLog(`Changed role to ${newRole}`, id);
+          loadUsers();
+        });
+      });
+
+      // Disable user
+      document.querySelectorAll(".btn-disable").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = btn.dataset.id;
+          await updateDoc(doc(db, "users", id), { status: "disabled" });
+          await addLog("Disabled user", id);
+          loadUsers();
+        });
+      });
+
+      // Enable user
+      document.querySelectorAll(".btn-enable").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = btn.dataset.id;
+          await updateDoc(doc(db, "users", id), { status: "approved" });
+          await addLog("Enabled user", id);
+          loadUsers();
+        });
+      });
+
+      // Delete user
+      document.querySelectorAll(".btn-delete").forEach(btn => {
+        btn.addEventListener("click", async () => {
+          const id = btn.dataset.id;
+          await deleteDoc(doc(db, "users", id));
+          await addLog("Deleted user", id);
+          loadUsers();
+        });
+      });
+    }
+
+    async function addLog(action, userId) {
+      await addDoc(collection(db, "logs"), {
+        time: new Date().toISOString(),
+        admin: currentAdmin,
+        action: action,
+        userId: userId
+      });
+    }
+
+    // Filter by Role
+    document.getElementById("roleFilter").addEventListener("change", () => {
+      filterAndSearch();
+    });
+
+    // Search users
+    document.getElementById("searchUser").addEventListener("input", () => {
+      filterAndSearch();
+    });
+
+    function filterAndSearch() {
+      const role = document.getElementById("roleFilter").value.toLowerCase();
+      const query = document.getElementById("searchUser").value.toLowerCase();
+
+      const filtered = allUsers.filter(u => {
+        const matchesRole =
+          role === "all" ||
+          (role === "pending" && (u.status || "pending") === "pending") ||
+          u.role.toLowerCase() === role;
+        const matchesSearch =
+          u.fullName.toLowerCase().includes(query) ||
+          u.email.toLowerCase().includes(query);
+        return matchesRole && matchesSearch;
+      });
+
+      displayUsers(filtered);
+    }
+
+    // Logout
+    document.getElementById("logout").addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "login.html";
+    });
+  </script>
+</body>
+</html>

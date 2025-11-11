@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Borrow Books — Brackenhurst</title>
+  <link rel="stylesheet" href="css/site.css" />
+  <style>
+    .books-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px,1fr)); gap:16px; margin-top:18px; }
+    .book-card { background:#fff; border-radius:10px; padding:14px; box-shadow:0 6px 20px rgba(15,23,42,0.04); text-align:left; display:flex; gap:12px; align-items:flex-start;}
+    .book-cover { width:92px; height:128px; object-fit:cover; border-radius:8px; flex-shrink:0; }
+    .book-info { flex:1; }
+    .book-info h4 { margin:0 0 6px; color:#1e3a8a; font-size:16px; }
+    .book-meta { color:#6b7280; font-size:13px; margin-bottom:8px; }
+    .book-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+    .btn { padding:8px 10px; border-radius:8px; border:1px solid transparent; cursor:pointer; }
+    .btn-primary { background:#4f46e5; color:white; border:none; }
+    .btn-ghost { background:transparent; border:1px solid #e5e7eb; }
+    .badge { padding:4px 8px; border-radius:6px; font-weight:600; font-size:12px; }
+    .badge-reserved { background:#fef3c7; color:#92400e; }
+    .notify { background:#fde68a; padding:10px; border-radius:8px; margin-bottom:12px; }
+    .small { font-size:13px; color:#6b7280; }
+    #myReservations { margin-top:20px; }
+    .reserved-row { background:#fff7ed; padding:10px; border-radius:8px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; gap:10px; }
+    .empty { text-align:center; color:#6b7280; padding:24px 0; }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav">
+          <a href="user-dashboard.html">Dashboard</a>
+          <a href="user-ebooks.html">eBooks</a>
+          <a href="saved-ebooks.html">My Saved eBooks</a>
+          <a href="borrow-books.html" class="active">Borrow Books</a>
+          <a href="my-loans.html">My Loans</a>
+        </nav>
+      </div>
+      <div class="small">Logged in as User</div>
+      <button id="logout" class="btn" style="margin:10px;">Logout</button>
+    </aside>
+
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">Borrow Books</div>
+          <div class="small">Reserve a physical copy for pickup at the library</div>
+        </div>
+      </div>
+
+      <div id="notifications"></div>
+
+      <section id="booksSection">
+        <div class="small" style="margin-top:12px;">Search & browse available books. Reservations hold for 24 hours until next day 16:30 — collect before 4:30 PM.</div>
+        <div style="margin:12px 0; text-align:right;">
+          <input id="search" placeholder="Search by title or author..." style="padding:8px;border-radius:8px;border:1px solid #e5e7eb;width:260px;">
+        </div>
+
+        <div class="books-grid" id="booksGrid">
+          <!-- book cards injected here -->
+        </div>
+
+        <section id="myReservations">
+          <h3 style="margin-top:18px;">My Reservations</h3>
+          <div id="reservationsList">
+            <div class="empty">Loading your reservations...</div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <div id="coverModal" style="position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.7);z-index:10000;padding:18px;">
+    <div style="position:relative;max-width:900px;max-height:90vh;">
+      <button id="closeCoverModal" style="position:absolute;right:-8px;top:-18px;background:#ef4444;color:white;border:none;padding:8px 10px;border-radius:6px;cursor:pointer;">Close</button>
+      <img id="coverModalImg" style="max-width:100%;max-height:90vh;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,0.5)"/>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+    import {
+      getAuth, onAuthStateChanged, signOut
+    } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+    import {
+      getFirestore, collection, doc, getDoc, getDocs,
+      addDoc, updateDoc, query, where, orderBy, onSnapshot, serverTimestamp
+    } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+      authDomain: "brackenhurstsystem.firebaseapp.com",
+      projectId: "brackenhurstsystem",
+      storageBucket: "brackenhurstsystem.appspot.com",
+      messagingSenderId: "98472895167",
+      appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+    };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    let currentUser = null;
+    let booksCache = {};    // id -> book data
+    let myReservations = []; // local list of loan docs owned by user
+
+    const DEFAULT_COVER = 'images/default-cover.png';
+
+    /* util helpers */
+    function showNotification(text) {
+      const n = document.createElement('div'); n.className = 'notify'; n.innerText = text;
+      document.getElementById('notifications').appendChild(n);
+      setTimeout(()=> n.remove(), 4500);
+    }
+    function escapeHtml(s){ if (s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+    /* calculate next pickup deadline: next day 16:30 local */
+    function nextPickupDeadline() {
+      const now = new Date();
+      const next = new Date(now);
+      next.setDate(now.getDate() + 1);
+      next.setHours(16,30,0,0);
+      return next;
+    }
+
+    /* detect base64 data uri superficially */
+    function looksLikeDataUri(s) {
+      return typeof s === 'string' && /^data:([a-zA-Z0-9\/+]+);base64,/.test(s) && s.length > 100;
+    }
+
+    /* create book card HTML */
+    function createBookCard(id, book) {
+      const cover = book.coverImage || book.coverBase64 || book.cover || '';
+      const copies = (typeof book.copies === 'number') ? book.copies : (book.copies ? Number(book.copies) : null);
+      const availableText = copies == null ? '—' : copies;
+      const card = document.createElement('div');
+      card.className = 'book-card';
+      const safeTitle = escapeHtml(book.title || 'Untitled');
+      const safeAuthor = escapeHtml(book.author || 'Unknown');
+      const safeCategory = escapeHtml(book.category || '');
+
+      const imgSrc = looksLikeDataUri(cover) ? cover : DEFAULT_COVER;
+      card.innerHTML = `
+        <img src="${imgSrc}" alt="cover" class="book-cover" onerror="this.onerror=null;this.src='${DEFAULT_COVER}';" data-cover="${escapeHtml(cover)}">
+        <div class="book-info">
+          <h4>${safeTitle}</h4>
+          <div class="book-meta">${safeAuthor} • <em>${safeCategory}</em></div>
+          <div class="small">Available copies: <strong id="copies-${id}">${availableText}</strong></div>
+          <div class="book-actions">
+            <button class="btn btn-primary btn-reserve" data-id="${id}">Reserve</button>
+            <button class="btn btn-ghost btn-preview" data-cover="${escapeHtml(cover)}">Preview Cover</button>
+          </div>
+        </div>
+      `;
+      return card;
+    }
+
+    /* render books to grid */
+    function renderBooks(snapshotDocs) {
+      const grid = document.getElementById('booksGrid');
+      grid.innerHTML = '';
+      snapshotDocs.forEach(docSnap => {
+        const id = docSnap.id;
+        const book = docSnap.data();
+        booksCache[id] = book;
+        const card = createBookCard(id, book);
+        grid.appendChild(card);
+      });
+      bindBookButtons();
+    }
+
+    /* bind actions on book cards */
+    function bindBookButtons() {
+      document.querySelectorAll('.btn-preview').forEach(btn => {
+        btn.removeEventListener('click', previewClick);
+        btn.addEventListener('click', previewClick);
+      });
+
+      document.querySelectorAll('.btn-reserve').forEach(btn => {
+        btn.removeEventListener('click', reserveClick);
+        btn.addEventListener('click', reserveClick);
+        const id = btn.dataset.id;
+        const book = booksCache[id] || {};
+        const copies = (typeof book.copies === 'number') ? book.copies : (book.copies ? Number(book.copies) : null);
+        if (copies === 0) {
+          btn.disabled = true;
+          btn.textContent = 'Unavailable';
+        } else {
+          btn.disabled = false;
+          btn.textContent = 'Reserve';
+        }
+      });
+    }
+
+    function previewClick(e){
+      const cover = e.currentTarget.dataset.cover;
+      const src = (looksLikeDataUri(cover) ? cover : DEFAULT_COVER);
+      document.getElementById('coverModalImg').src = src;
+      document.getElementById('coverModal').style.display = 'flex';
+    }
+
+    /* Reserve click handler */
+    async function reserveClick(e){
+      const id = e.currentTarget.dataset.id;
+      if (!currentUser) return alert('Not signed in.');
+      const book = booksCache[id];
+      if (!book) return alert('Book not found.');
+      const copies = (typeof book.copies === 'number') ? book.copies : (book.copies ? Number(book.copies) : null);
+      if (copies !== null && copies <= 0) { alert('No copies available.'); return; }
+
+      try {
+        const reservedUntilDt = nextPickupDeadline();
+        const loan = {
+          userId: currentUser.id,
+          userName: currentUser.fullName || currentUser.email || 'User',
+          bookId: id,
+          bookTitle: book.title || '',
+          status: 'Reserved',
+          requestedAt: new Date().toISOString(),
+          reservedUntil: reservedUntilDt.toISOString(),
+          reservedBy: null
+        };
+
+        const ref = await addDoc(collection(db, 'loans'), loan);
+        showNotification(`Reserved — collect before ${reservedUntilDt.toLocaleString()}`);
+        loadMyReservations();
+
+      } catch (err) {
+        console.error(err);
+        alert('Failed to create reservation.');
+      }
+    }
+
+    /* Load user's reservations (listen realtime) */
+    async function loadMyReservations() {
+      if (!currentUser) return;
+      const q = query(collection(db, 'loans'), where('userId','==', currentUser.id), orderBy('requestedAt','desc'));
+      onSnapshot(q, snap => {
+        myReservations = [];
+        const container = document.getElementById('reservationsList');
+        container.innerHTML = '';
+        let found = false;
+        snap.forEach(docSnap => {
+          const l = { id: docSnap.id, ...docSnap.data() };
+          if (['Reserved','Pending','Borrowed','Overdue'].includes(l.status)) {
+            found = true;
+            myReservations.push(l);
+            const reservedUntil = l.reservedUntil ? new Date(l.reservedUntil) : null;
+            const untilText = reservedUntil ? reservedUntil.toLocaleString() : '—';
+            const bookTitle = escapeHtml(l.bookTitle || 'Untitled');
+            const status = escapeHtml(l.status || '—');
+
+            const row = document.createElement('div');
+            row.className = 'reserved-row';
+            row.innerHTML = `<div><strong>${bookTitle}</strong><div class="small">${status} • Requested: ${l.requestedAt ? new Date(l.requestedAt).toLocaleString() : '—'}</div><div class="small">Reserved until: <strong>${untilText}</strong></div></div>
+                             <div style="display:flex;gap:8px;align-items:center;">
+                               ${l.status === 'Reserved' ? `<button class="btn btn-ghost btn-cancel" data-id="${l.id}">Cancel</button>` : ''}
+
+                               ${l.status === 'Reserved' ? `<span class="badge badge-reserved">Reserved</span>` : `<span class="small">${status}</span>`}
+                             </div>`;
+            container.appendChild(row);
+          }
+        });
+        if (!found) container.innerHTML = '<div class="empty">You have no active reservations.</div>';
+        bindReservationActions();
+      }, err => {
+        console.error('reservation listener', err);
+      });
+    }
+
+    /* bind cancel buttons for reservations */
+    function bindReservationActions() {
+      document.querySelectorAll('.btn-cancel').forEach(btn => {
+        btn.removeEventListener('click', cancelReservation);
+        btn.addEventListener('click', cancelReservation);
+      });
+    }
+
+    async function cancelReservation(e) {
+      const id = e.currentTarget.dataset.id;
+      if (!confirm('Cancel this reservation?')) return;
+      try {
+        await updateDoc(doc(db, 'loans', id), { status: 'Cancelled', cancelledAt: new Date().toISOString() });
+        showNotification('Reservation cancelled.');
+      } catch (err) {
+        console.error(err);
+        alert('Failed to cancel.');
+      }
+    }
+
+    /* realtime books listener */
+    function watchBooksRealtime() {
+      const col = collection(db, 'books');
+      onSnapshot(col, snap => {
+        const docs = [];
+        snap.forEach(s => docs.push(s));
+        renderBooks(docs);
+      }, err => console.error('books snapshot', err));
+    }
+
+    /* search filter */
+    document.getElementById('search').addEventListener('input', (e) => {
+      const term = e.target.value.toLowerCase();
+      document.querySelectorAll('.book-card').forEach(card => {
+        const text = card.textContent.toLowerCase();
+        card.style.display = text.includes(term) ? '' : 'none';
+      });
+    });
+
+    /* cover modal close */
+    document.getElementById('closeCoverModal').addEventListener('click', ()=> {
+      document.getElementById('coverModal').style.display = 'none';
+      document.getElementById('coverModalImg').src = '';
+    });
+
+    document.getElementById('coverModal').addEventListener('click', (ev) => { 
+      if (ev.target === document.getElementById('coverModal')) { 
+        document.getElementById('coverModal').style.display = 'none'; 
+        document.getElementById('coverModalImg').src = ''; 
+      } 
+    });
+
+    /* auth guard + initial load */
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return (window.location.href = 'login.html');
+      const uSnap = await getDoc(doc(db, 'users', user.uid));
+      if (!uSnap.exists()) { alert('Profile not found.'); return; }
+      currentUser = { id: user.uid, ...uSnap.data() };
+
+      const smallDiv = document.querySelector('.small');
+      if (smallDiv) smallDiv.textContent = `Logged in as ${currentUser.fullName || currentUser.email || 'User'}`;
+
+      watchBooksRealtime();
+      loadMyReservations();
+    });
+
+    /* logout */
+    document.getElementById('logout').addEventListener('click', async () => {
+      await signOut(auth);
+      window.location.href = 'login.html';
+    });
+
+  </script>
+</body>
+</html>

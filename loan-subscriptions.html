@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>My Loan Subscriptions — Brackenhurst Library</title>
+  <link rel="stylesheet" href="css/site.css" />
+  <style>
+    /* Table Styling */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+
+    th, td {
+      padding: 12px 15px;
+      text-align: left;
+      border: 1px solid #ddd;
+    }
+
+    th {
+      background-color: #34495e;
+      color: white;
+      font-size: 16px;
+    }
+
+    td {
+      background-color: #fff;
+      font-size: 14px;
+    }
+
+    /* Row Status Styling */
+    .overdue {
+      color: red;
+      font-weight: bold;
+      background-color: #f8d7da;
+    }
+
+    .active {
+      color: green;
+      font-weight: bold;
+      background-color: #d4edda;
+    }
+
+    .search-bar {
+      margin-bottom: 20px;
+    }
+
+    .search-bar input {
+      padding: 10px;
+      width: 300px;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+      font-size: 14px;
+    }
+
+    /* Hover Effect */
+    tr:hover {
+      background-color: #f4f4f4;
+    }
+
+    /* Status Icon Styling */
+    .status-icon {
+      margin-right: 8px;
+    }
+
+    /* No results found message */
+    .no-results {
+      text-align: center;
+      font-style: italic;
+      color: #888;
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav">
+          <a href="user-dashboard.html">Dashboard</a>
+          <a href="user-books.html">Books</a>
+          <a href="user-ebooks.html">eBooks</a>
+          <a href="my-loans.html" class="active">My Loans</a>
+          <a href="logs.html">Logs</a>
+        </nav>
+      </div>
+      <div class="small">Logged in as User</div>
+    </aside>
+
+    <!-- Main -->
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">My Loan Subscriptions</div>
+          <div class="small">Track and manage your loan subscriptions</div>
+        </div>
+        <div class="row">
+          <button id="logout" class="btn">Logout</button>
+        </div>
+      </div>
+
+      <!-- Loan Subscriptions Table -->
+      <section style="margin-top: 10px;">
+        <h3 style="margin-bottom:10px;">Loan Status</h3>
+        <div class="search-bar">
+          <input type="text" id="searchInput" placeholder="Search by book title, user name, or email" onkeyup="searchMyLoans()">
+        </div>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Book Title</th>
+              <th>Status</th>
+              <th>Due Date</th>
+            </tr>
+          </thead>
+          <tbody id="myLoansTable">
+            <tr><td colspan="3" style="text-align:center;">Loading your loans...</td></tr>
+          </tbody>
+        </table>
+        <p id="noResultsMessage" class="no-results" style="display:none;">No results found.</p>
+      </section>
+    </main>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+    import { getFirestore, collection, query, where, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+    // Firebase config
+    const firebaseConfig = {
+      apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+      authDomain: "brackenhurstsystem.firebaseapp.com",
+      projectId: "brackenhurstsystem",
+      storageBucket: "brackenhurstsystem.appspot.com",
+      messagingSenderId: "98472895167",
+      appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+    };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    let currentUser = null;
+
+    // Auth listener
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return window.location.href = "login.html";
+      currentUser = user;
+      loadUserLoans();
+    });
+
+    // Load user-specific loan subscriptions (approved loans)
+    async function loadUserLoans() {
+      const loansRef = collection(db, "loans");
+      const q = query(loansRef, where("userId", "==", currentUser.uid));
+      onSnapshot(q, async (querySnapshot) => {
+        const tbody = document.getElementById("myLoansTable");
+        tbody.innerHTML = "";  // Clear table content
+
+        if (querySnapshot.empty) {
+          tbody.innerHTML = "<tr><td colspan='3' style='text-align:center;'>You have no active loans.</td></tr>";
+          return;
+        }
+
+        querySnapshot.forEach(async (docSnap) => {
+          const loanData = docSnap.data();
+          const reservedUntil = loanData.reservedUntil ? new Date(loanData.reservedUntil) : null;
+          const dueDate = reservedUntil ? new Date(reservedUntil.setDate(reservedUntil.getDate() + 14)) : null; // Set due date to 14 days from reserved
+
+          const status = dueDate && new Date() > dueDate ? "Overdue" : "Active"; // Check if the book is overdue
+          const statusClass = status === "Overdue" ? "overdue" : "active";
+
+          const row = document.createElement("tr");
+          row.innerHTML = `
+            <td>${loanData.bookTitle}</td>
+            <td class="${statusClass}">${status}</td>
+            <td>${dueDate ? dueDate.toLocaleString() : "N/A"}</td>
+          `;
+          tbody.appendChild(row);
+        });
+      });
+    }
+
+    // Search functionality
+    function searchMyLoans() {
+      const input = document.getElementById('searchInput').value.toLowerCase();
+      const rows = document.getElementById("myLoansTable").getElementsByTagName("tr");
+      let found = false;
+
+      Array.from(rows).forEach(row => {
+        const bookTitle = row.cells[0] ? row.cells[0].textContent.toLowerCase() : '';
+        const status = row.cells[1] ? row.cells[1].textContent.toLowerCase() : '';
+
+        if (bookTitle.includes(input) || status.includes(input)) {
+          row.style.display = "";
+          found = true;
+        } else {
+          row.style.display = "none";
+        }
+      });
+
+      // Show "No results found" if no rows match the search query
+      const noResultsMessage = document.getElementById('noResultsMessage');
+      if (!found) {
+        noResultsMessage.style.display = 'block';
+      } else {
+        noResultsMessage.style.display = 'none';
+      }
+    }
+
+    // Logout action
+    document.getElementById("logout").addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "login.html";
+    });
+  </script>
+</body>
+</html>

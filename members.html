@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Members — Brackenhurst Library</title>
+<link rel="stylesheet" href="css/site.css" />
+
+<style>
+  .table { width:100%; border-collapse:collapse; }
+  .table th, .table td { padding:8px 10px; border-bottom:1px solid #e5e7eb; text-align:left; }
+  .btn { padding:8px 10px; border-radius:8px; border:1px solid transparent; cursor:pointer; background:#f3f4f6; }
+  .btn-primary { background:#4f46e5; color:white; border:none; }
+  .btn-ghost { background:transparent; border:1px solid #e5e7eb; }
+  .small { font-size:13px; color:#6b7280; }
+  .card { background:white; padding:12px; border-radius:8px; box-shadow:0 2px 8px rgba(15,23,42,0.05); margin-top:12px; }
+</style>
+</head>
+
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav">
+          <a href="librarian-dashboard.html">Dashboard</a>
+          <a href="librarian-books.html">Books</a>
+          <a href="librarian-ebooks.html">eBooks</a>
+          <a href="ebook-subscriptions.html">eBook Subscriptions</a>
+          <a href="loan-subscriptions.html">Loan Subscriptions</a>
+          <a href="loans.html">Loans</a>
+          <a href="members.html" class="active">Members</a>
+          <a href="librarian-logs.html">Logs</a>
+        </nav>
+      </div>
+      <div class="small">Logged in as Librarian</div>
+    </aside>
+
+    <!-- Main -->
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">Members</div>
+          <div class="small">View library members and their loan records</div>
+        </div>
+        <div class="row">
+          <button id="refreshMembers" class="btn">Refresh</button>
+          <button id="logout" class="btn">Logout</button>
+        </div>
+      </div>
+
+      <!-- Search -->
+      <div style="margin-top:10px;">
+        <input id="searchMember" placeholder="Search members by name or email..." style="padding:8px; width:300px; border:1px solid #e5e7eb; border-radius:8px;">
+      </div>
+
+      <!-- Members Table -->
+      <section style="margin-top:12px;">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="membersTable">
+            <tr><td colspan="4" style="text-align:center;">Loading members...</td></tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- Member Loans -->
+      <div id="memberLoansCard" class="card" style="display:none;">
+        <h3 id="memberLoansTitle">Member Loans</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Book</th>
+              <th>Issued At</th>
+              <th>Due Date</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="memberLoansTable">
+            <tr><td colspan="4" style="text-align:center;">No loans found.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </main>
+  </div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+import { 
+  getFirestore, collection, getDocs, doc, getDoc, addDoc
+} from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+// Firebase setup
+const firebaseConfig = {
+  apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+  authDomain: "brackenhurstsystem.firebaseapp.com",
+  projectId: "brackenhurstsystem",
+  storageBucket: "brackenhurstsystem.appspot.com",
+  messagingSenderId: "98472895167",
+  appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let allUsers = [];
+let allLoans = [];
+let currentLibrarian = "";
+
+// Auth check
+onAuthStateChanged(auth, async (user) => {
+  if (!user) return window.location.href = "login.html";
+  const res = await fetch(`https://firestore.googleapis.com/v1/projects/brackenhurstsystem/databases/(default)/documents/users/${user.uid}`);
+  const json = await res.json();
+  const data = json.fields;
+  if (!data || data.role.stringValue !== "Librarian") {
+    alert("Access denied. Librarians only.");
+    return window.location.href = "login.html";
+  }
+  currentLibrarian = data.fullName.stringValue;
+  loadMembers();
+});
+
+// Load Members
+async function loadMembers() {
+  const tbody = document.getElementById("membersTable");
+  tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">Loading...</td></tr>`;
+  const usersSnap = await getDocs(collection(db, "users"));
+  const loansSnap = await getDocs(collection(db, "loanRequests"));
+  allLoans = loansSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+  allUsers = usersSnap.docs.map(d => ({ id: d.id, ...d.data() })).filter(u => u.role === "User");
+  renderMembers(allUsers);
+}
+
+// Render Members Table
+function renderMembers(list) {
+  const tbody = document.getElementById("membersTable");
+  if (list.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">No members found.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = "";
+  list.forEach(u => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${u.fullName || "—"}</td>
+      <td>${u.email || "—"}</td>
+      <td>${u.role}</td>
+      <td><button class="btn btn-ghost btn-view" data-id="${u.id}">View Loans</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  document.querySelectorAll(".btn-view").forEach(btn => {
+    btn.addEventListener("click", () => openMemberLoans(btn.dataset.id));
+  });
+}
+
+// View Member Loans
+async function openMemberLoans(userId) {
+  const user = allUsers.find(u => u.id === userId);
+  const userLoans = allLoans.filter(l => l.userId === userId);
+  document.getElementById("memberLoansCard").style.display = "block";
+  document.getElementById("memberLoansTitle").innerText = `Loans for ${user.fullName}`;
+  const tbody = document.getElementById("memberLoansTable");
+  if (userLoans.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">No loans found for this member.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = "";
+  userLoans.forEach(l => {
+    const row = document.createElement("tr");
+    row.innerHTML = `
+      <td>${l.bookTitle || "—"}</td>
+      <td>${l.issuedAt ? new Date(l.issuedAt).toLocaleString() : "—"}</td>
+      <td>${l.dueDate ? new Date(l.dueDate).toLocaleDateString() : "—"}</td>
+      <td>${l.status}</td>
+    `;
+    tbody.appendChild(row);
+  });
+  await logAction("Viewed Member Loans", `Viewed loans for ${user.fullName}`);
+}
+
+// Search
+document.getElementById("searchMember").addEventListener("input", e => {
+  const q = e.target.value.toLowerCase();
+  const filtered = allUsers.filter(u =>
+    (u.fullName || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q)
+  );
+  renderMembers(filtered);
+});
+
+// Refresh
+document.getElementById("refreshMembers").addEventListener("click", loadMembers);
+
+// Log
+async function logAction(action, details) {
+  await addDoc(collection(db, "librarianLogs"), {
+    time: new Date().toISOString(),
+    librarian: currentLibrarian,
+    action,
+    details
+  });
+}
+
+// Logout
+document.getElementById("logout").addEventListener("click", async () => {
+  await signOut(auth);
+  window.location.href = "login.html";
+});
+</script>
+</body>
+</html>

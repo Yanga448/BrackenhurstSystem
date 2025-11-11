@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>User Dashboard — Brackenhurst</title>
+<link rel="stylesheet" href="css/site.css" />
+<style>
+  body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    background-color: #f9fafb;
+    margin: 0;
+  }
+  .verify-form input[type="text"], 
+  .verify-form input[type="file"] {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 10px;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+  }
+  .verify-form button {
+    background-color: #4f46e5;
+    color: white;
+    padding: 10px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    width: 100%;
+  }
+  .verify-form button:hover {
+    background-color: #4338ca;
+  }
+  .preview {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .preview img {
+    width: 100px;
+    height: 100px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid #ddd;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+  }
+  .card {
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+  }
+  .card h3 {
+    margin: 10px 0;
+  }
+  .restricted {
+    color: #dc2626;
+    background: #fee2e2;
+    padding: 10px;
+    border-radius: 8px;
+    margin-top: 10px;
+  }
+</style>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav">
+  <a href="user-dashboard.html" class="active">Dashboard</a>
+  <a href="user-ebooks.html" id="ebooksLink">eBooks</a>
+  <a href="my-saved-ebooks.html" id="savedEbooksLink">My Saved eBooks</a>
+  <a href="borrow-books.html" id="borrowLink">Borrow Books</a>
+  <a href="my-loans.html" id="myLoansLink">My Loans</a>
+  <a href="login.html" id="logout">Logout</a>
+</nav>
+
+      </div>
+      <div class="small">Logged in as User</div>
+    </aside>
+
+    <!-- Main -->
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">Welcome <span id="userName">User</span></div>
+          <div class="small">Manage your eBooks and physical loans.</div>
+        </div>
+      </div>
+
+      <!-- Verification Section -->
+      <section id="verifySection" style="display:none;">
+        <h3>Complete Verification</h3>
+        <p>To access eBooks and borrow books, please verify your identity.</p>
+        <form id="verifyForm" class="verify-form">
+          <input type="text" id="saId" placeholder="Enter South African ID Number" maxlength="13" required />
+          <label><strong>ID Card Image:</strong></label>
+          <input type="file" id="idCardImage" accept="image/*" required />
+          <label><strong>Proof of Residence:</strong></label>
+          <input type="file" id="proofOfResImage" accept="image/*" required />
+
+          <div class="preview">
+            <div id="idCardPreview"></div>
+            <div id="proofPreview"></div>
+          </div>
+
+          <button type="submit">Submit for Review</button>
+        </form>
+      </section>
+
+      <!-- Approved Features -->
+      <section id="approvedSection" style="display:none;">
+        <h3>Your Library</h3>
+        <div class="grid">
+          <div class="card">
+            <h3>📘 eBooks</h3>
+            <p>Browse digital books available for reading.</p>
+            <button onclick="window.location.href='user-ebooks.html'">Open eBooks</button>
+          </div>
+          <div class="card">
+            <h3>💾 My Saved eBooks</h3>
+            <p>View eBooks you’ve saved for future reading.</p>
+            <button onclick="window.location.href='saved-ebooks.html'">View Saved</button>
+          </div>
+          <div class="card">
+            <h3>📚 Borrow Books</h3>
+            <p>Request to borrow physical books from the library.</p>
+            <button onclick="window.location.href='borrow-books.html'">Borrow Now</button>
+          </div>
+          <div class="card">
+            <h3>🧾 My Loans</h3>
+            <p>See your borrowed books and due dates.</p>
+            <button onclick="window.location.href='my-loans.html'">View Loans</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="restrictedMsg" class="restricted" style="display:none;">
+        Access restricted — please complete verification before accessing eBooks or borrowing books.
+      </div>
+    </main>
+  </div>
+
+  <!-- Firebase Logic -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+    import { getFirestore, doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+      authDomain: "brackenhurstsystem.firebaseapp.com",
+      projectId: "brackenhurstsystem",
+      storageBucket: "brackenhurstsystem.appspot.com",
+      messagingSenderId: "98472895167",
+      appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+    };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    let idCardBase64 = "", proofBase64 = "";
+
+    // Preview and convert to Base64
+    document.getElementById("idCardImage").addEventListener("change", e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        idCardBase64 = reader.result;
+        document.getElementById("idCardPreview").innerHTML = `<img src="${reader.result}" />`;
+      };
+      reader.readAsDataURL(file);
+    });
+    document.getElementById("proofOfResImage").addEventListener("change", e => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        proofBase64 = reader.result;
+        document.getElementById("proofPreview").innerHTML = `<img src="${reader.result}" />`;
+      };
+      reader.readAsDataURL(file);
+    });
+
+    onAuthStateChanged(auth, async (user) => {
+      if (!user) return window.location.href = "login.html";
+      const snap = await getDoc(doc(db, "users", user.uid));
+      if (!snap.exists()) return alert("User not found.");
+      const u = snap.data();
+      document.getElementById("userName").innerText = u.fullName;
+
+      const verifySection = document.getElementById("verifySection");
+      const approvedSection = document.getElementById("approvedSection");
+
+      if (u.verificationStatus === "approved") {
+        approvedSection.style.display = "block";
+      } else if (u.verificationStatus === "pending") {
+        verifySection.innerHTML = "<p>Your verification is under review. Please wait for librarian approval.</p>";
+        verifySection.style.display = "block";
+      } else {
+        verifySection.style.display = "block";
+      }
+
+      // Restrict direct navigation
+      const restrictedMsg = document.getElementById("restrictedMsg");
+      ["ebooksLink","savedEbooksLink","borrowLink","myLoansLink"].forEach(id => {
+        document.getElementById(id).addEventListener("click", e => {
+          if (u.verificationStatus !== "approved") {
+            e.preventDefault();
+            restrictedMsg.style.display = "block";
+            setTimeout(()=> restrictedMsg.style.display="none",4000);
+          }
+        });
+      });
+    });
+
+    document.getElementById("verifyForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const saId = document.getElementById("saId").value.trim();
+      if (!saId || !idCardBase64 || !proofBase64) return alert("Please fill in all fields and upload both images.");
+
+      const user = auth.currentUser;
+      await updateDoc(doc(db, "users", user.uid), {
+        saId, idCardImage: idCardBase64, proofOfResImage: proofBase64, verificationStatus: "pending"
+      });
+
+      alert("Submitted for review! Librarian will verify your details soon.");
+      location.reload();
+    });
+
+    document.getElementById("logout").addEventListener("click", async () => {
+      await signOut(auth);
+      window.location.href = "login.html";
+    });
+  </script>
+</body>
+</html>

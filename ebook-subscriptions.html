@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>eBook Subscriptions — Brackenhurst Library</title>
+<link rel="stylesheet" href="css/site.css" />
+<style>
+  .id-preview img {
+    width: 90px;
+    height: 90px;
+    object-fit: cover;
+    border-radius: 6px;
+    border: 1px solid #d1d5db;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+  }
+  .id-preview img:hover {
+    transform: scale(1.05);
+  }
+  .id-preview {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Modal styling for zoom view */
+  .image-modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.9);
+    justify-content: center;
+    align-items: center;
+  }
+  .image-modal img {
+    max-width: 80%;
+    max-height: 80%;
+    border-radius: 10px;
+  }
+  .image-modal:target {
+    display: flex;
+  }
+</style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="app-sidebar">
+      <div>
+        <div class="brand">Brackenhurst</div>
+        <nav class="nav" role="navigation">
+          <a href="librarian-dashboard.html">Dashboard</a>
+          <a href="librarian-books.html">Books</a>
+          <a href="librarian-ebooks.html">eBooks</a>
+          <a href="ebook-subscriptions.html" class="active">eBook Subscriptions</a>
+          <a href="loan-subscriptions.html">Loan Subscriptions</a>
+          <a href="loans.html">Loans</a>
+          <a href="members.html">Members</a>
+          <a href="logs.html">Logs</a>
+        </nav>
+      </div>
+      <div class="small">Logged in as Librarian</div>
+    </aside>
+
+    <main class="app-main">
+      <div class="header-row">
+        <div>
+          <div class="page-title">eBook Subscriptions</div>
+          <div class="small">Review & approve South African citizens for eBook access</div>
+        </div>
+        <div class="row">
+          <button id="logout" class="btn">Logout</button>
+        </div>
+      </div>
+
+      <section style="margin-top: 10px;">
+        <h3 style="margin-bottom:10px;">Pending eBook Access Requests</h3>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Full Name</th>
+              <th>Email</th>
+              <th>SA ID Number</th>
+              <th>ID Card</th>
+              <th>Proof of Residence</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="ebookRequestsTable">
+            <tr><td colspan="6" style="text-align:center;">Loading requests...</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </div>
+
+  <!-- Image Zoom Modal -->
+  <div id="imageModal" class="image-modal" onclick="this.style.display='none'">
+    <img id="modalImage" src="" alt="Zoomed View" />
+  </div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-auth.js";
+import { getFirestore, collection, getDocs, updateDoc, doc, addDoc } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-firestore.js";
+
+// Firebase config
+const firebaseConfig = {
+  apiKey: "AIzaSyCJ07UzzIx_dIiY0WxllufSgXCj7ltXA08",
+  authDomain: "brackenhurstsystem.firebaseapp.com",
+  projectId: "brackenhurstsystem",
+  storageBucket: "brackenhurstsystem.appspot.com",
+  messagingSenderId: "98472895167",
+  appId: "1:98472895167:web:5e9d1710d6b8fb5de09c0a"
+};
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+let currentLibrarian = null;
+
+// Auth check
+onAuthStateChanged(auth, async (user) => {
+  if (!user) return window.location.href = "login.html";
+  const res = await fetch(`https://firestore.googleapis.com/v1/projects/brackenhurstsystem/databases/(default)/documents/users/${user.uid}`);
+  const json = await res.json();
+  const data = json.fields;
+  if (!data || data.role.stringValue !== "Librarian") {
+    alert("Access denied. Librarians only.");
+    return window.location.href = "login.html";
+  }
+  currentLibrarian = data.fullName.stringValue;
+  loadEbookRequests();
+});
+
+// Load pending requests
+async function loadEbookRequests() {
+  const snap = await getDocs(collection(db, "users"));
+  const tbody = document.getElementById("ebookRequestsTable");
+  tbody.innerHTML = "";
+
+  let found = false;
+
+  snap.forEach(docSnap => {
+    const user = docSnap.data();
+    if (user.verificationStatus === "pending" && user.status === "approved") {
+      found = true;
+      const idImg = user.idCardImage ? `<img src="${user.idCardImage}" onclick="openImageModal('${user.idCardImage}')"/>` : "—";
+      const proofImg = user.proofOfResImage ? `<img src="${user.proofOfResImage}" onclick="openImageModal('${user.proofOfResImage}')"/>` : "—";
+
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${user.fullName || "—"}</td>
+        <td>${user.email || "—"}</td>
+        <td>${user.saId || "—"}</td>
+        <td class="id-preview">${idImg}</td>
+        <td class="id-preview">${proofImg}</td>
+        <td>
+          <button class="btn btn-primary btn-approve" data-id="${docSnap.id}">Approve</button>
+          <button class="btn btn-ghost btn-deny" data-id="${docSnap.id}">Deny</button>
+        </td>
+      `;
+      tbody.appendChild(row);
+    }
+  });
+
+  if (!found) {
+    tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;">No pending eBook verification requests.</td></tr>`;
+  }
+
+  bindEbookActions();
+}
+
+// Open image modal
+window.openImageModal = function(src) {
+  const modal = document.getElementById("imageModal");
+  const modalImg = document.getElementById("modalImage");
+  modalImg.src = src;
+  modal.style.display = "flex";
+}
+
+// Approve/Deny
+function bindEbookActions() {
+  document.querySelectorAll(".btn-approve").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const userRef = doc(db, "users", id);
+      await updateDoc(userRef, { verificationStatus: "approved" });
+      await logAction("Approved eBook Access", `Librarian ${currentLibrarian} approved user ID ${id}`);
+      alert("✅ User approved for eBook access.");
+      loadEbookRequests();
+    });
+  });
+
+  document.querySelectorAll(".btn-deny").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const id = btn.dataset.id;
+      const userRef = doc(db, "users", id);
+      await updateDoc(userRef, { verificationStatus: "denied" });
+      await logAction("Denied eBook Access", `Librarian ${currentLibrarian} denied user ID ${id}`);
+      alert("❌ User request denied.");
+      loadEbookRequests();
+    });
+  });
+}
+
+// Log librarian actions
+async function logAction(action, details) {
+  await addDoc(collection(db, "librarianLogs"), {
+    time: new Date().toISOString(),
+    librarian: currentLibrarian,
+    action,
+    details
+  });
+}
+
+// Logout
+document.getElementById("logout").addEventListener("click", async () => {
+  await signOut(auth);
+  window.location.href = "login.html";
+});
+</script>
+</body>
+</html>
